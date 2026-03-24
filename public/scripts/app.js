@@ -3512,7 +3512,7 @@ ${clAssets.length?`<button class="btn btn-purple btn-sm" onclick="viewClientAsse
 </div>
 <div style="background:var(--bg4);border-bottom:1px solid var(--b1);padding:5px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
 <span style="font-size:9px;color:var(--t4)">Modules:</span>
-${['visuals','video','audio'].map(m=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3);cursor:pointer" onclick="toggleModule('${m}')"><button class="toggle ${p.modules?.[m]?'on':''}"></button>${m}</label>`).join('')}
+${['visuals','video','audio','post_production'].map(m=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3);cursor:pointer" onclick="toggleModule('${m}')"><button class="toggle ${p.modules?.[m]?'on':''}"></button>${m==='post_production'?'post pro':m}</label>`).join('')}
 <span style="font-size:9px;color:var(--t4);margin-left:8px">Synopsis: <span style="color:${p.synopsisLocked?'var(--green)':'var(--gold)'}">${p.synopsisLocked?'Locked ✓':'Pending'}</span></span>
 <span style="font-size:9px;color:var(--t4)">Storyboard: <span style="color:${p.storyboardReleased?'var(--green)':'var(--t4)'}">${p.storyboardReleased?'Released ✓':'Not released'}</span></span>
 ${p.pendingFeedback?`<span class="badge badge-red">Client feedback: ${p.pendingFeedback}</span>`:''}
@@ -3523,11 +3523,11 @@ ${stageTabs(p)}${stepNav(p)}
 
 function toggleModule(m){const p=DB.getProject(S.pid);if(!p)return;if(!p.modules)p.modules={};p.modules[m]=!p.modules[m];DB.saveProject(p);render();}
 function stageTabs(p){
-  const stages=[{n:1,l:'✍ Writing',on:true},{n:2,l:'🖼 Visuals',m:'visuals'},{n:3,l:'🎬 Production',m:'video'}];
+  const stages=[{n:1,l:'✍ Writing',on:true},{n:2,l:'🖼 Visuals',m:'visuals',ml:'visuals'},{n:3,l:'🎬 Production',m:'video',ml:'video'},{n:4,l:'⚙ Post Pro',m:'post_production',ml:'post pro'}];
   const uid=S.session?.userId;const role=S.session?.role;
   const unread=getUnreadCommentCount(p,uid);
   const isInternal=role==='admin'||role==='creator';
-  return`<div class="studio-stages">${stages.map(st=>{const on=st.on||(p.modules?.[st.m]);return`<div class="sst${S.stage===st.n?' active':''}${!on?' off':''}" onclick="${on?`goStage(${st.n})`:`toast('Enable ${st.m} module first','err')`}">${st.l}</div>`;}).join('')}
+  return`<div class="studio-stages">${stages.map(st=>{const on=st.on||(p.modules?.[st.m]);return`<div class="sst${S.stage===st.n?' active':''}${!on?' off':''}" onclick="${on?`goStage(${st.n})`:`toast('Enable ${st.ml||st.m} module first','err')`}">${st.l}</div>`;}).join('')}
 ${isInternal?`<div class="sst${S.stage===98?' active':''}" onclick="goStage(98);markCommentsRead('${p.id}','${uid}')" style="margin-left:auto;display:flex;align-items:center;gap:4px">💬 Comments${unread?`<span style="background:var(--red);color:#fff;font-size:7px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:14px;text-align:center">${unread}</span>`:'('+((p.comments||[]).length)+')'}</div>`:`<div style="flex:1"></div>`}
 <div class="sst${S.stage===99?' active':''}" onclick="goStage(99)" style="${isInternal?'':'margin-left:auto;'}color:var(--t4)">📅 Timeline</div></div>`;
 }
@@ -3538,6 +3538,7 @@ function stepNav(p){
   let steps;
   if(S.stage===1)steps=[{n:1,l:'Brief'},{n:2,l:'Synopsis'},{n:3,l:'Script'},{n:4,l:'Bible'},{n:5,l:'Shots'}];
   else if(S.stage===2)steps=[{n:1,l:'References'},{n:2,l:'Multi-Angle'},{n:3,l:'Storyboard'}];
+  else if(S.stage===4)steps=[{n:1,l:'Tools'},{n:2,l:'Scripts'},{n:3,l:'Export'}];
   else steps=[{n:1,l:'Model'},{n:2,l:'Lock'},{n:3,l:'Prompts'},{n:4,l:'Video'},{n:5,l:'Audio'},{n:6,l:'Assembly'}];
   return`<div class="step-nav">${steps.map(s=>`<div class="sn${S.step===s.n?' active':''}" onclick="goStep(${s.n})"><div class="snum">${s.n}</div>${s.l}</div>`).join('')}</div>`;
 }
@@ -3556,6 +3557,10 @@ function stepContent(p,mt){
     if(S.step===1)return w+sRefs(p)+'</div>';
     if(S.step===2)return w+sMultiAngle(p)+'</div>';
     if(S.step===3)return w+sStoryboard(p)+'</div>';
+  }else if(S.stage===4){
+    if(S.step===1)return w+sPostToolSelection(p)+'</div>';
+    if(S.step===2)return w+sPostProcessing(p)+'</div>';
+    if(S.step===3)return w+sPostExport(p)+'</div>';
   }else{
     if(S.step===1)return w+sModel(p)+'</div>';
     if(S.step===2)return w+sLock(p)+'</div>';
