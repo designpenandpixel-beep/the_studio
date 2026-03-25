@@ -95,6 +95,15 @@ const MT={
     ]},
 };
 
+const IMG_MODELS=[
+  {id:'fal-ai/flux-pro/v1.1-ultra',n:'FLUX 1.1 Ultra',s:'Best quality, photorealistic',tags:['recommended','photorealistic'],c:'~$0.06/img'},
+  {id:'fal-ai/flux/dev',n:'FLUX Dev',s:'Fast, good quality',tags:['fast'],c:'~$0.03/img'},
+  {id:'fal-ai/recraft-v3',n:'Recraft V3',s:'Design, illustration, logos',tags:['design','illustration'],c:'~$0.04/img'},
+  {id:'fal-ai/ideogram/v2',n:'Ideogram V2',s:'Text in images, posters',tags:['text-rendering'],c:'~$0.05/img'},
+  {id:'fal-ai/flux-pro/kontext',n:'FLUX Kontext',s:'Image-to-image, consistency',tags:['img2img','consistency'],c:'~$0.05/img'}
+];
+const IMG_QUALITY=['standard','hd'];
+const IMG_TONES=['photorealistic','cinematic','illustration','editorial','minimal','vibrant','moody','warm','cool'];
 const VIDEO_MODELS=[
   {id:'fal-ai/veo3',n:'Google Veo 3',s:'Dialogue, humans, cinematic',tags:['dialogue','cinematic'],c:'~$0.50–1.00/shot'},
   {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master',s:'Consistency, vehicles, stylized',tags:['consistency'],c:'~$0.20–0.40'},
@@ -527,7 +536,7 @@ function render(){
   const sb=document.getElementById('sbar');
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
-  app.innerHTML='<div class="app-layout">'+appBarHTML()+'<div class="app-main"><div class="app-topbar">'+appTopBarHTML()+'</div><div class="app-content">'+mainHTML()+'</div></div></div>';
+  app.innerHTML=appBarHTML()+mainHTML();
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -568,80 +577,45 @@ function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashb
 // ══════════════════════════════════════
 // APP BAR
 // ══════════════════════════════════════
-function appTopBarHTML(){
+function appBarHTML(){
   const r=S.session?.role;
-  const tabLabels={dashboard:'Dashboard',projects:'All Projects',timeline:'Timeline',clients:'Clients',creators:'Creators',integrations:'Integrations',ld:'L&D',leads:'Leads',settings:'Settings',studio:'Studio','my projects':'My Projects',new:'New Request',assets:'Brand Assets',inbox:'Inbox'};
-  const currentLabel=tabLabels[S.tab]||S.tab;
-  return`<div class="app-topbar-left">
-<span class="app-breadcrumb">The Studio <span style="color:var(--t4);margin:0 6px">/</span> <span>${esc(currentLabel)}</span></span>
-</div>
-<div class="app-topbar-right">
-${r==='admin'?`<button class="btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
-  <div style="display:flex;gap:5px;align-items:center"><span style="font-size:11px;color:var(--t3)">API</span><div style="display:flex;gap:3px"><div class="kdot${getKey('claude')?' ok':''}" title="Claude"></div><div class="kdot${getKey('fal')?' ok':''}" title="fal.ai"></div><div class="kdot${getKey('el')?' ok':''}" title="ElevenLabs"></div></div></div>
+  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
+  const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
+  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
+  const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
+  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
+  return`<div class="app-bar">
+<div class="logo">The <span>Studio</span></div>
+<div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
+<span class="rb-${r}">${roleLabel}</span>
+<span class="app-bar-name">${S.session?.name}</span>
+<nav class="app-bar-nav">
+${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
+${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
+</nav>
+<div class="app-bar-right">
+${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
+  <div style="display:flex;gap:4px;align-items:center">
+    <span style="font-size:9px;color:var(--t3)">API Keys</span>
+    <div style="display:flex;gap:3px"><div class="kdot${getKey('claude')?' ok':''}" title="Claude"></div><div class="kdot${getKey('fal')?' ok':''}" title="fal.ai"></div><div class="kdot${getKey('el')?' ok':''}" title="ElevenLabs"></div></div>
+  </div>
 </button>`:''}
 <div style="position:relative;display:inline-flex;align-items:center">
 <button onclick="toggleNotifPanel()" class="notif-btn" title="Notifications">
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
   <div id="notif-badge" class="notif-count" style="display:none"></div>
 </button>
 </div>
+<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
-<div id="notif-panel" style="display:none;position:fixed;top:52px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:10px;z-index:300;overflow:hidden;box-shadow:0 8px 32px #000c">
-<div style="padding:10px 14px;background:var(--bg4);border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center">
-<span style="font-size:12px;font-weight:700;color:var(--t1)">Notifications</span>
-<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:10px;cursor:pointer">Mark all read</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:16px;cursor:pointer;line-height:1">✕</button></div>
+</div>
+<div id="notif-panel" style="display:none;position:fixed;top:46px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:9px;z-index:300;overflow:hidden;box-shadow:0 8px 24px #000a">
+<div style="padding:9px 13px;background:var(--bg4);border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:11px;font-weight:700;color:var(--gold)">Notifications</span>
+<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer">Mark all read</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:14px;cursor:pointer">✕</button></div>
 </div>
 <div id="notif-list" style="overflow-y:auto;max-height:380px"></div>
 </div>`;
-}
-
-function appBarHTML(){
-  const r=S.session?.role;
-  const adminNav=[
-    {k:'dashboard',l:'Dashboard',i:'⊞'},
-    {k:'projects',l:'All Projects',i:'◧'},
-    {k:'timeline',l:'Timeline',i:'▤'},
-    {k:'clients',l:'Clients',i:'◉'},
-    {k:'creators',l:'Creators',i:'◈'},
-    {k:'integrations',l:'Integrations',i:'⬡'},
-    {k:'ld',l:'L&D',i:'◎'},
-    {k:'leads',l:'Leads',i:'◆'},
-    {k:'settings',l:'Settings',i:'⚙'},
-  ];
-  const creatorNav=[
-    {k:'dashboard',l:'My Projects',i:'⊞'},
-    {k:'clients',l:'My Clients',i:'◉'},
-    {k:'inbox',l:'Inbox',i:'✉'},
-  ];
-  const clientNav=[
-    {k:'dashboard',l:'My Projects',i:'⊞'},
-    {k:'new',l:'New Request',i:'＋'},
-    {k:'assets',l:'Brand Assets',i:'◧'},
-  ];
-  const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
-  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
-  const initials=(S.session?.name||'?').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
-
-  return`<aside class="sidebar">
-<div class="sb-logo-wrap">
-  <div class="sb-logo">The <span>Studio</span></div>
-  <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')" style="cursor:pointer"></div>
-</div>
-<div class="sb-user-wrap">
-  <div class="uav uav-${r}" style="flex-shrink:0">${initials}</div>
-  <div style="flex:1;min-width:0">
-    <div class="sb-user-name">${esc(S.session?.name||'')}</div>
-    <div class="sb-user-role">${roleLabel}</div>
-  </div>
-</div>
-<nav class="sb-nav">
-${nav.map(t=>`<button class="sb-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')"><span class="sb-icon">${t.i}</span>${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge" style="margin-left:auto">${getUnreadCount()}</span>`:''}</button>`).join('')}
-${(r==='admin'||r==='creator')&&S.pid?`<button class="sb-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')"><span class="sb-icon">◈</span>Studio</button>`:''}
-</nav>
-<div class="sb-footer">
-  <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start" onclick="doLogout()">Sign Out</button>
-</div>
-</aside>`;
 }
 
 function getKey(k){const u=DB.getUser(S.session?.userId);return u?.apiKeys?.[k]||''}
@@ -3598,7 +3572,8 @@ ${!assets.length?'<div style="color:var(--t4);font-size:10px;padding:12px;grid-c
 
 function openModal(html){document.getElementById('modal-root').innerHTML=`<div class="modal-wrap" onclick="if(event.target===this)closeModal()"><div class="modal-box"><button class="modal-close" onclick="closeModal()">✕</button>${html}</div></div>`;}
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
-function openImgModal(title,url){if(!url)return;openModal(`<div class="modal-title">${esc(title)}</div><img src="${url}" style="width:100%;border-radius:6px;margin-bottom:10px"/><button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
+function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
+function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
 function viewAsClient(cid){const og=S.session.userId;S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
 
 // ══════════════════════════════════════
@@ -4146,11 +4121,54 @@ function sRefs(p){
   const grouped={};REF_TYPES.forEach(t=>grouped[t]=[]);
   refs.forEach((r,i)=>{const t=r.type||'prop';if(!grouped[t])grouped[t]=[];grouped[t].push({...r,_i:i});});
   const anyDone=refs.some(r=>r.img||r.status==='done');
+  if(!S.imgModel)S.imgModel='fal-ai/flux-pro/v1.1-ultra';
+  if(!S.imgAspect)S.imgAspect='1:1';
+  if(!S.imgQuality)S.imgQuality='hd';
+  if(!S.imgTone)S.imgTone='photorealistic';
   return`<div class="ptitle">References</div>
 <div class="psub">Build your visual consistency library — upload existing assets or AI-generate new ones.</div>
+<!-- Image Generation Settings -->
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+<div style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase;margin-bottom:8px">Image Generation Settings</div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:8px;color:var(--t4);text-transform:uppercase">Model</span>
+<select id="img-model-sel" onchange="S.imgModel=this.value" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px">
+${IMG_MODELS.filter(m=>m.id!=='fal-ai/flux-pro/kontext').map(m=>`<option value="${m.id}" ${S.imgModel===m.id?'selected':''}>${m.n} — ${m.s} (${m.c})</option>`).join('')}
+</select>
+</div>
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:8px;color:var(--t4);text-transform:uppercase">Aspect Ratio</span>
+<select id="img-aspect-sel" onchange="S.imgAspect=this.value" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px">
+${['1:1','16:9','9:16','4:3','3:4','21:9'].map(r=>`<option value="${r}" ${S.imgAspect===r?'selected':''}>${r}</option>`).join('')}
+</select>
+</div>
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:8px;color:var(--t4);text-transform:uppercase">Quality</span>
+<select id="img-quality-sel" onchange="S.imgQuality=this.value" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px">
+${IMG_QUALITY.map(q=>`<option value="${q}" ${S.imgQuality===q?'selected':''}>${q}</option>`).join('')}
+</select>
+</div>
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:8px;color:var(--t4);text-transform:uppercase">Tone / Style</span>
+<select id="img-tone-sel" onchange="S.imgTone=this.value" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px">
+${IMG_TONES.map(t=>`<option value="${t}" ${S.imgTone===t?'selected':''}>${t}</option>`).join('')}
+</select>
+</div>
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:8px;color:var(--t4);text-transform:uppercase">Mode</span>
+<select id="img-mode-sel" onchange="S.imgMode=this.value" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px">
+<option value="t2i" ${S.imgMode!=='i2i'?'selected':''}>Text → Image</option>
+<option value="i2i" ${S.imgMode==='i2i'?'selected':''}>Image → Image</option>
+</select>
+</div>
+</div>
+<div style="font-size:8px;color:var(--t4);margin-top:6px">Using: <strong style="color:var(--gold)">${IMG_MODELS.find(m=>m.id===S.imgModel)?.n||'FLUX 1.1 Ultra'}</strong> · ${S.imgAspect} · ${S.imgQuality} quality · ${S.imgTone} tone</div>
+</div>
 ${trendingStylesPanel(p)}
 <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
 <button class="btn btn-gold" onclick="genAllRefs()" id="btn-gen-refs">✦ Generate All Pending</button>
+<button class="btn btn-red btn-sm" onclick="S.stopSb=true;toast('Stopping...','info')">■ Stop</button>
 <button class="btn btn-outline btn-sm" onclick="showAddRefModal()">+ Add Reference</button>
 <button class="btn btn-ghost btn-sm" onclick="rebuildRefs(DB.getProject(S.pid));render()">Rebuild from Bible</button>
 ${clA.length?`<button class="btn btn-blue btn-sm" onclick="importClientAssets()">↓ Import Brand Assets (${clA.length})</button>`:''}
@@ -4174,7 +4192,7 @@ ${ref.uploaded?'<span style="font-size:7px;color:var(--blue);background:#050d18;
 </div>
 </div>
 <div style="aspect-ratio:1;background:var(--bg4);overflow:hidden;position:relative" id="ri-${ref._i}">
-${ref.img?`<img src="${ref.img}" onclick="openImgModal('${esc(ref.label||'')}','${ref.img}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"/>`:'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--b3);font-size:24px">◇</div>'}
+${ref.img?`<img src="${ref.img}" onclick="openImgModal('${esc(ref.label||'')}','${ref.img}','${esc(ref.prompt||ref._lastPrompt||'')}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"/>`:'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--b3);font-size:24px">◇</div>'}
 </div>
 <div style="padding:5px 7px;display:flex;gap:3px">
 ${ref.uploaded?'':`<button onclick="doRef(DB.getProject(S.pid),${ref._i})" style="flex:1;background:var(--bg4);border:1px solid var(--b2);color:var(--t3);font-size:8px;padding:3px;border-radius:3px;cursor:pointer">⟳ Gen</button>`}
@@ -4249,8 +4267,37 @@ function doAddRef(){
   DB.saveProject(p);closeModal();render();toast('Reference added!','ok');
 }
 function importClientAssets(){const p=DB.getProject(S.pid);if(!p||!p.clientId)return;const assets=DB.getUser(p.clientId)?.brandAssets?.filter(a=>a.preview)||[];if(!p.refs)p.refs=[];assets.forEach(a=>{if(!p.refs.find(r=>r.label===a.name))p.refs.push({label:a.name,type:'client_asset',prompt:a.name,img:a.preview,status:'done'});});DB.saveProject(p);render();toast(`${assets.length} client assets imported!`,'ok');}
-async function genAllRefs(){const p=DB.getProject(S.pid);if(!p)return;if(!kF()){toast('Enter fal.ai key','err');return}if(!p.refs?.length){rebuildRefs(p);}document.getElementById('btn-gen-refs').disabled=true;S.stopSb=false;for(let i=0;i<p.refs.length;i++){if(S.stopSb)break;await doRef(p,i);}document.getElementById('btn-gen-refs').disabled=false;toast('References done!','ok');}
-async function doRef(p,i){p.refs[i].status='gen';setRst(i,'gen','generating...');document.getElementById(`ri-${i}`).innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div>';try{const url=await falImg(applyRAGToPrompt(p.refs[i].prompt,p.id));const pUrl=await persistImage(url);p.refs[i].img=pUrl;p.refs[i].status='done';document.getElementById(`ri-${i}`).innerHTML=`<img src="${url}" onclick="openImgModal('${esc(p.refs[i].label||'')}','${url}')" style="width:100%;height:100%;object-fit:cover"/>`;setRst(i,'done','done');DB.saveProject(p);}catch(e){p.refs[i].status='error';setRst(i,'error',e.message||'error');toast('Image failed: '+( e.message||'unknown error'),'err');}}
+async function genAllRefs(){
+  const p=DB.getProject(S.pid);if(!p)return;if(!kF()){toast('Enter fal.ai key','err');return;}
+  if(!p.refs?.length){rebuildRefs(p);}
+  const pending=p.refs.filter(r=>!r.img&&r.status!=='done').length;
+  const modelName=IMG_MODELS.find(m=>m.id===(S.imgModel||'fal-ai/flux-pro/v1.1-ultra'))?.n||'FLUX 1.1 Ultra';
+  if(pending>3&&!confirm(`Generate ${pending} references using ${modelName}?\nEstimated cost: ~$${(pending*0.06).toFixed(2)}\n\nYou can stop anytime.`))return;
+  document.getElementById('btn-gen-refs').disabled=true;S.stopSb=false;S._consecutiveErrors=0;
+  for(let i=0;i<p.refs.length;i++){
+    if(S.stopSb)break;
+    if(p.refs[i].img&&p.refs[i].status==='done')continue;
+    await doRef(p,i);
+    if(p.refs[i].status==='error'){S._consecutiveErrors=(S._consecutiveErrors||0)+1;if(S._consecutiveErrors>=3){S.stopSb=true;toast('Auto-stopped: 3 consecutive errors','err');break;}}else{S._consecutiveErrors=0;}
+  }
+  document.getElementById('btn-gen-refs').disabled=false;if(!S.stopSb)toast('References done!','ok');
+}
+async function doRef(p,i){
+  if(S.stopSb){return;}
+  p.refs[i].status='gen';
+  const imgModel=S.imgModel||'fal-ai/flux-pro/v1.1-ultra';
+  const modelLabel=IMG_MODELS.find(m=>m.id===imgModel)?.n||'FLUX 1.1 Ultra';
+  setRst(i,'gen',modelLabel);
+  document.getElementById(`ri-${i}`).innerHTML='<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px"><div class="spinner"></div><span style="font-size:7px;color:var(--t4)">'+esc(modelLabel)+'</span></div>';
+  try{
+    const prompt=applyRAGToPrompt(p.refs[i].prompt,p.id);
+    p.refs[i]._lastPrompt=prompt;
+    const url=await falImg(prompt);
+    const pUrl=await persistImage(url);p.refs[i].img=pUrl;p.refs[i].status='done';
+    document.getElementById(`ri-${i}`).innerHTML=`<img src="${url}" onclick="openImgModal('${esc(p.refs[i].label||'')}','${url}','${esc(p.refs[i]._lastPrompt||'')}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in"/>`;
+    setRst(i,'done','done');DB.saveProject(p);
+  }catch(e){p.refs[i].status='error';setRst(i,'error',e.message||'error');toast('Image failed: '+(e.message||'unknown error'),'err');}
+}
 function setRst(i,st,txt){const el=document.getElementById(`rst-${i}`);if(el){el.style.background=st==='done'?'#041004':st==='gen'?'#1a0f00':'var(--bg4)';el.style.color=st==='done'?'var(--green)':st==='gen'?'var(--gold)':st==='error'?'var(--red)':'var(--t4)';el.textContent=txt;}}
 
 // ── STAGE 2, STEP 2: MULTI-ANGLE ──
@@ -4270,17 +4317,28 @@ function getAngleSet(n){
 function sMultiAngle(p){
   const refs=(p.refs||[]).filter(r=>r.img);
   const gridSize=S.maGrid||6;
-  return`<div class="ptitle">Multi-Angle Grid</div>
-<div class="psub">Generate ${gridSize} angles for each reference using img2img — builds visual consistency for storyboard generation.</div>
+  if(!S.maSelectedAngles)S.maSelectedAngles={};
+  const aSet=getAngleSet(gridSize);
+  return`<div class="ptitle">Multi-Angle Grid <span style="font-size:10px;color:var(--t4);font-weight:400;margin-left:6px">(Optional)</span></div>
+<div class="psub">Generate angles for each reference using img2img — builds visual consistency for storyboard. <strong>This step is optional</strong> — you can skip directly to Storyboard.</div>
 ${!refs.length?`<div class="ib ib-red">No reference images yet. Go back to References and generate or upload at least one reference first.</div>`:''}
-<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <span style="font-size:10px;color:var(--t3);font-weight:700">Grid size:</span>
-${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};render()" style="background:${gridSize===n?'#1a1000':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
-<button class="btn btn-gold" onclick="genAllAngles()" id="btn-ma-all" style="margin-left:8px">✦ Generate All</button>
+${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};S.maSelectedAngles={};render()" style="background:${gridSize===n?'#1a1000':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
+<button class="btn btn-gold" onclick="genAllAngles()" id="btn-ma-all" style="margin-left:8px">✦ Generate Selected</button>
 <button class="btn btn-ghost btn-sm" onclick="S.stopSb=true">■ Stop</button>
 <div style="display:flex;gap:5px;margin-left:auto">
 <button class="btn btn-ghost btn-sm" onclick="goStep(1)">← Refs</button>
-<button class="btn btn-gold" onclick="goStep(3)">Storyboard →</button>
+<button class="btn btn-gold" onclick="goStep(3)">Skip → Storyboard</button>
+</div>
+</div>
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:8px 12px;margin-bottom:14px">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase">Select angles to generate:</span>
+<button onclick="toggleAllAngles(true)" style="font-size:8px;color:var(--blue);background:none;border:none;cursor:pointer;text-decoration:underline">All</button>
+<button onclick="toggleAllAngles(false)" style="font-size:8px;color:var(--t4);background:none;border:none;cursor:pointer;text-decoration:underline">None</button>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+${aSet.names.map((name,ai)=>{const checked=S.maSelectedAngles[ai]!==false;return`<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:${checked?'var(--t2)':'var(--t4)'}"><input type="checkbox" ${checked?'checked':''} onchange="S.maSelectedAngles[${ai}]=this.checked;render()" style="accent-color:var(--gold)"/>${name}</label>`;}).join('')}
 </div>
 </div>
 ${refs.length?refs.map((ref,ri)=>{
@@ -4326,6 +4384,7 @@ ${angles.heroAngle!==null&&angles.heroAngle!==undefined?`<div style="padding:6px
 </div>`;
 }
 
+function toggleAllAngles(on){const aSet=getAngleSet(S.maGrid||6);if(!S.maSelectedAngles)S.maSelectedAngles={};aSet.names.forEach((_,i)=>{S.maSelectedAngles[i]=on;});render();}
 function setHeroAngle(refIdx,angleIdx){
   const p=DB.getProject(S.pid);if(!p)return;
   if(!p.multiAngles)p.multiAngles={};
@@ -4341,19 +4400,23 @@ async function genRefAngles(refIdx){
   if(!p.multiAngles)p.multiAngles={};
   if(!p.multiAngles[refIdx])p.multiAngles[refIdx]={angles:[],heroAngle:null};
   S.stopSb=false;
+  const selectedAngles=S.maSelectedAngles||{};
   for(let ai=0;ai<aSet.prompts.length;ai++){
-    if(S.stopSb)break;
+    if(S.stopSb){toast('Generation stopped','info');break;}
+    // Skip unselected angles
+    if(selectedAngles[ai]===false)continue;
     const cell=document.getElementById(`ma-${refIdx}-${ai}`);
     if(cell)cell.querySelector('div[style*="aspect-ratio"]').innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div>';
     try{
       const basePrompt=ref.prompt||ref.label||'subject reference';
       const anglePrompt=`${basePrompt}. ${aSet.prompts[ai]}. Consistent with base reference, same subject, same style, clean background, sharp focus, photorealistic.`;
+      const useI2I=!ref.img.startsWith('data:');
+      const modelName=useI2I?'FLUX Kontext (img2img)':'FLUX 1.1 Ultra (text2img)';
+      if(cell){const stEl=cell.querySelector('span[style*="font-size:8px"]');if(stEl)stEl.textContent=modelName;}
       let url;
-      if(ref.img.startsWith('data:')){
-        // Uploaded image: use text-to-image with strong angle descriptor (can't do I2I with base64)
+      if(!useI2I){
         url=await falImg(anglePrompt);
       }else{
-        // Generated CDN URL: use img2img for real consistency
         url=await falImgI2I(ref.img,anglePrompt,0.62);
       }
       if(!p.multiAngles[refIdx].angles)p.multiAngles[refIdx].angles=[];
@@ -4441,24 +4504,35 @@ function sbCard(s,sd){
   const p=DB.getProject(S.pid);
   const variants=(p?.sbVariants||{})[s.num]?.variants||[];
   const selIdx=(p?.sbVariants||{})[s.num]?.selectedIdx||0;
-  return`<div class="sbc2" id="sbc-${s.num}">
+  const qaResult=sd.qaResult||null;
+  const shotComment=(p?.sbComments||{})[s.num]||'';
+  const shotPrompt=sd.prompt||s.prompt||'';
+  const hasQaIssue=qaResult&&!qaResult.pass;
+  return`<div class="sbc2" id="sbc-${s.num}" style="${hasQaIssue?'border:2px solid var(--red);':''}">
 <div class="sbt">
 <span class="sbnum">S${s.num}</span>
 <span style="font-size:8px;color:#B8960C77;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scene||'')}</span>
+${qaResult?`<span style="font-size:7px;color:${qaResult.pass?'var(--green)':'var(--red)'};background:${qaResult.pass?'#041004':'#180404'};padding:1px 5px;border-radius:3px;font-weight:700" title="${esc(qaResult.feedback||'')}">QA:${qaResult.score||'?'}/10</span>`:''}
 ${variants.length?`<span style="font-size:7px;color:var(--blue);background:#050d18;padding:1px 4px;border-radius:3px">${variants.length}v</span>`:''}
 <span class="sbst ${bc}" id="sbb-${s.num}">${bt}</span>
 </div>
-<div class="sb-iw" id="sbi-${s.num}">${sd.img?`<img src="${sd.img}" onclick="openImgModal('S${s.num}','${sd.img}')" loading="lazy"/>`:'<div class="sb-ph">◇</div>'}</div>
+<div class="sb-iw" id="sbi-${s.num}" style="${hasQaIssue?'position:relative;':''}">
+${sd.img?`<img src="${sd.img}" onclick="openImgModal('S${s.num}','${sd.img}','${esc(shotPrompt)}')" loading="lazy"/>`:'<div class="sb-ph">◇</div>'}
+${hasQaIssue?`<div style="position:absolute;top:4px;right:4px;background:var(--red);color:#fff;font-size:7px;font-weight:700;padding:2px 6px;border-radius:3px">⚠ Issues Found</div>`:''}
+</div>
 ${variants.length>1?`<div style="display:flex;gap:2px;padding:4px 5px 0;overflow-x:auto">
 ${variants.map((v,vi)=>`<img src="${v}" style="width:28px;height:28px;object-fit:cover;border-radius:2px;border:1px solid ${vi===selIdx?'var(--gold)':'var(--b2)'};cursor:pointer;flex-shrink:0" onclick="selectSbVariant('${s.num}',${vi})" title="Variant ${vi+1}"/>`).join('')}
 </div>`:''}
+${shotPrompt?`<div style="padding:3px 6px;max-height:32px;overflow:hidden"><div style="font-size:7px;color:var(--t4);line-height:1.3;word-break:break-word;cursor:pointer" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'24px':'none'" title="Click to expand">${esc(shotPrompt).substring(0,120)}${shotPrompt.length>120?'…':''}</div></div>`:''}
+<div style="padding:3px 6px"><input type="text" placeholder="Add comment for regeneration…" value="${esc(shotComment)}" onchange="saveSbComment('${s.num}',this.value)" style="width:100%;background:var(--bg4);border:1px solid var(--b1);color:var(--t2);font-size:8px;padding:3px 6px;border-radius:3px;box-sizing:border-box"/></div>
 <div class="sb-btns">
-<button onclick="singleSb('${s.num}')">⟳</button>
-<button onclick="openImgModal('S${s.num}',S.sbState['${s.num}']?.img)" ${sd.img?'':'disabled'}>View</button>
+<button onclick="singleSb('${s.num}')" title="${shotComment?'Will use your comment in regeneration':'Regenerate'}">⟳${shotComment?' 💬':''}</button>
+<button onclick="openImgModal('S${s.num}',S.sbState['${s.num}']?.img,'${esc(shotPrompt)}')" ${sd.img?'':'disabled'}>View</button>
 <button onclick="dlImg(S.sbState['${s.num}']?.img,'S${s.num}_hires.jpg')" ${sd.img?'':'disabled'} title="Download full res">↓ HiRes</button>
 </div>
 </div>`;
 }
+function saveSbComment(num,comment){const p=DB.getProject(S.pid);if(!p)return;if(!p.sbComments)p.sbComments={};p.sbComments[num]=comment;DB.saveProject(p);}
 function selectSbVariant(num,idx){
   const p=DB.getProject(S.pid);if(!p||!p.sbVariants?.[num])return;
   p.sbVariants[num].selectedIdx=idx;
@@ -4468,15 +4542,37 @@ function selectSbVariant(num,idx){
   // Update variant thumbnails border
   render();
 }
-async function genAllSb(){const p=DB.getProject(S.pid);if(!p)return;if(!kF()){toast('Enter fal.ai key','err');return}S.stopSb=false;document.getElementById('btn-sb').disabled=true;document.getElementById('sb-prog').classList.add('show');for(const s of p.shots){if(S.stopSb)break;if(S.sbState[s.num]?.status==='done')continue;await runSbShot(p,s);}document.getElementById('btn-sb').disabled=false;if(!S.stopSb)toast('Storyboard done!','ok');}
-async function resumeSb(){S.stopSb=false;const p=DB.getProject(S.pid);if(!p)return;for(const s of p.shots){if(S.stopSb)break;const st=S.sbState[s.num]?.status;if(!st||st==='idle'||st==='error')await runSbShot(p,s);}}
+async function genAllSb(){
+  const p=DB.getProject(S.pid);if(!p)return;if(!kF()){toast('Enter fal.ai key','err');return;}
+  const pending=(p.shots||[]).filter(s=>S.sbState[s.num]?.status!=='done').length;
+  const modelName=IMG_MODELS.find(m=>m.id===(S.imgModel||'fal-ai/flux-pro/v1.1-ultra'))?.n||'FLUX 1.1 Ultra';
+  const estCost=(pending*0.06).toFixed(2);
+  if(pending>3&&!confirm(`Generate ${pending} shots using ${modelName}?\nEstimated cost: ~$${estCost}\n\nYou can stop anytime with the Stop button.`))return;
+  S.stopSb=false;S._consecutiveErrors=0;
+  document.getElementById('btn-sb').disabled=true;document.getElementById('sb-prog').classList.add('show');
+  for(const s of p.shots){
+    if(S.stopSb)break;
+    if(S.sbState[s.num]?.status==='done')continue;
+    await runSbShot(p,s);
+    // Auto-stop after 3 consecutive errors to prevent cost waste
+    if(S.sbState[s.num]?.status==='error'){
+      S._consecutiveErrors=(S._consecutiveErrors||0)+1;
+      if(S._consecutiveErrors>=3){S.stopSb=true;toast('Auto-stopped: 3 consecutive errors. Check your API key or connection.','err');break;}
+    }else{S._consecutiveErrors=0;}
+  }
+  document.getElementById('btn-sb').disabled=false;if(!S.stopSb)toast('Storyboard done!','ok');
+}
+async function resumeSb(){S.stopSb=false;S._consecutiveErrors=0;const p=DB.getProject(S.pid);if(!p)return;for(const s of p.shots){if(S.stopSb)break;const st=S.sbState[s.num]?.status;if(!st||st==='idle'||st==='error'){await runSbShot(p,s);if(S.sbState[s.num]?.status==='error'){S._consecutiveErrors=(S._consecutiveErrors||0)+1;if(S._consecutiveErrors>=3){S.stopSb=true;toast('Auto-stopped: 3 consecutive errors','err');break;}}else{S._consecutiveErrors=0;}}}}
 async function singleSb(num){S.stopSb=false;const p=DB.getProject(S.pid);if(!p)return;S.sbState[num]={status:'idle',img:null};const s=p.shots.find(x=>x.num===num);if(!s)return;await runSbShot(p,s);}
 async function runSbShot(p,shot){
-  S.sbState[shot.num]={status:'gen',img:null};setSbSt(shot.num,'gen','gen...');
+  if(S.stopSb)return;
+  S.sbState[shot.num]={status:'gen',img:null,prompt:''};setSbSt(shot.num,'gen','gen...');
   const maxTries=parseInt(document.getElementById('s-rt')?.value)||3;
   const doQa=document.getElementById('tog-qa')?.classList.contains('on');
   const thresh=parseInt(document.getElementById('s-th')?.value)||7;
   const bestOf3=document.getElementById('tog-bo3')?.classList.contains('on');
+  // Include user comment in prompt if available
+  const userComment=(p.sbComments||{})[shot.num]||'';
   // Build rich anchor: use hero angle images from multi-angle step
   const heroAnchors=[];
   (p.refs||[]).forEach((ref,ri)=>{
@@ -4490,7 +4586,9 @@ async function runSbShot(p,shot){
   const anchor=heroAnchors.slice(0,3).map(r=>`[${(r.type||'REF').toUpperCase()} "${r.label}" — ${r.angleName}]`).join(' ');
   const heroImg=heroAnchors[0]?.img;// Primary hero reference image
   const basePrompt=shot.prompt;
-  const enrichedPrompt=(anchor?anchor+' ':'')+'SHOT: '+basePrompt+'. Maintain strict visual consistency with all referenced characters, products, and locations.';
+  const commentAddendum=userComment?` CORRECTION: ${userComment}.`:'';
+  const enrichedPrompt=(anchor?anchor+' ':'')+'SHOT: '+basePrompt+'. Maintain strict visual consistency with all referenced characters, products, and locations.'+commentAddendum;
+  S.sbState[shot.num].prompt=enrichedPrompt;
   const p4=DB.getProject(S.pid);const ragPrompt=p4?applyRAGToPrompt(enrichedPrompt,p4.id):enrichedPrompt;
   try{
     let finalUrl;
@@ -4537,6 +4635,7 @@ async function runSbShot(p,shot){
       if(doQa&&kC()){
         setSbSt(shot.num,'check','QA...');
         const qa=await checkQa(url,shot.prompt,thresh);
+        S.sbState[shot.num].qaResult=qa;
         if(!qa.pass){
           try{url=await falImg(ragPrompt);}catch(e){}
         }
@@ -5042,28 +5141,35 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){const method=(init&&init.method)||'GET';const auth=(init&&init.headers&&(init.headers['Authorization']||init.headers['authorization']))||'';let body=undefined;if(init&&init.body){try{body=JSON.parse(init.body);}catch{body=init.body;}}return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,authorization:auth})});}
+function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization'];const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,authorization})});}
 async function falImg(prompt){
-  const k=kF();if(!k)throw new Error('No fal.ai key');const rat=document.getElementById('s-rat')?.value||'16:9';
+  const k=kF();if(!k)throw new Error('No fal.ai key');
+  if(S.stopSb)throw new Error('Stopped');
+  const rat=S.imgAspect||document.getElementById('s-rat')?.value||'16:9';
+  // Apply tone/quality to prompt if set
+  const tone=S.imgTone||'photorealistic';
+  const quality=S.imgQuality||'hd';
+  const enhancedPrompt=prompt+(tone!=='photorealistic'?`. Style: ${tone}`:'')+(quality==='hd'?'. Ultra high detail, sharp focus.':'');
   // Check for active LoRA from selected trends
   const activeLoras=(S.selectedTrends||[])
     .map(id=>DB.getLDEntry(id))
     .filter(e=>e?.lora_model_id&&e?.lora_status==='ready');
-  let model='fal-ai/flux-pro/v1.1-ultra';
-  let body={prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
+  let model=S.imgModel||'fal-ai/flux-pro/v1.1-ultra';
+  let body={prompt:enhancedPrompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
   if(activeLoras.length){
     model='fal-ai/flux-lora';
     const sizeMap={'21:9':'landscape_16_9','16:9':'landscape_16_9','4:3':'landscape_4_3','1:1':'square_hd','9:16':'portrait_16_9','3:4':'portrait_4_3'};
-    body={prompt,image_size:sizeMap[rat]||'landscape_16_9',output_format:'jpeg',loras:activeLoras.map(e=>({path:e.lora_model_id,scale:0.85})),model_name:'dev'};
+    body={prompt:enhancedPrompt,image_size:sizeMap[rat]||'landscape_16_9',output_format:'jpeg',loras:activeLoras.map(e=>({path:e.lora_model_id,scale:0.85})),model_name:'dev'};
   }
   const r=await falFetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${model}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${model}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await falFetch(statusUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
 }
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
+  if(S.stopSb)throw new Error('Stopped');
   const k=kF();if(!k)throw new Error('No fal.ai key');
   const rat=document.getElementById('s-rat')?.value||'1:1';
   const model='fal-ai/flux-pro/kontext';
@@ -5072,7 +5178,7 @@ async function falImgI2I(imgUrl,prompt,strength){
   if(!r.ok){const t=await r.text();throw new Error(`fal i2i ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${model}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${model}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){await sleep(2200);const rs=await falFetch(statusUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
 }
 async function falVid(imgUrl,prompt,dur,ratio){
   const k=kF();if(!k)throw new Error('No fal.ai key');if(!S.vidModel)throw new Error('No model');
@@ -5080,9 +5186,9 @@ async function falVid(imgUrl,prompt,dur,ratio){
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){if(S.stopVid)throw new Error('Stopped');await sleep(3000);const rs=await falFetch(statusUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{method:'GET',headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.video?.url||rd.videos?.[0]?.url;if(!u)throw new Error('No video URL');return u}if(ds.status==='FAILED')throw new Error('Video generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){if(S.stopVid)throw new Error('Stopped');await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.video?.url||rd.videos?.[0]?.url;if(!u)throw new Error('No video URL');return u}if(ds.status==='FAILED')throw new Error('Video generation failed');}throw new Error('Timeout');
 }
-async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!b64)return{pass:true};const r=await callClaude('Evaluate images. JSON only: {"score":1-10,"pass":true/false}',`Score 1-10 (pass if >= ${thresh}). Prompt: ${prompt.substring(0,120)}`,200,b64,'image/jpeg');const d=JSON.parse(r.replace(/```json|```/g,'').trim());return{score:d.score||5,pass:d.pass!==undefined?d.pass:(d.score||5)>=thresh};}catch(e){return{pass:true};}}
+async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!b64)return{pass:true};const r=await callClaude('Evaluate images for quality and prompt accuracy. Return JSON only: {"score":1-10,"pass":true/false,"feedback":"brief description of any issues found","issues":["issue1","issue2"]}',`Score 1-10 (pass if >= ${thresh}). Check for: anatomical errors, text rendering issues, missing elements, wrong colors, inconsistencies. Prompt: ${prompt.substring(0,200)}`,400,b64,'image/jpeg');const d=JSON.parse(r.replace(/```json|```/g,'').trim());return{score:d.score||5,pass:d.pass!==undefined?d.pass:(d.score||5)>=thresh,feedback:d.feedback||'',issues:d.issues||[]};}catch(e){return{pass:true};}}
 
 // ══════════════════════════════════════
 // HELPERS
