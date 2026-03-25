@@ -15,18 +15,27 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid target URL' });
   }
 
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {};
   const auth = req.headers['authorization'];
   if (auth) headers['Authorization'] = auth;
 
   try {
     const init = { method: req.method, headers };
     if (req.method === 'POST') {
+      headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(req.body);
     }
 
     const response = await fetch(target, init);
-    const data = await response.json();
+    const text = await response.text();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+
     return res.status(response.status).json(data);
   } catch (e) {
     return res.status(500).json({ error: e.message });
