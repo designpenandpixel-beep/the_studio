@@ -1,56 +1,32 @@
-export const prerender = false;
+export const prerender = false
 
-const ALLOWED = ['https://queue.fal.run/', 'https://rest.fal.run/', 'https://fal.run/'];
+export async function POST({ request }: any) {
+  const body = await request.json()
+  const falKey = import.meta.env.FAL_KEY
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+  const response = await fetch(body.url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${falKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body.payload)
+  })
+  const data = await response.json()
+  return new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
 
-export const OPTIONS = async () => {
-  return new Response(null, { status: 200, headers: CORS });
-};
+export async function GET({ url }: any) {
+  const targetUrl = url.searchParams.get('url')
+  const falKey = import.meta.env.FAL_KEY
 
-export const POST = async ({ request }) => {
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const { url, method = 'GET', body, authorization } = payload;
-
-  if (!url || !ALLOWED.some(p => url.startsWith(p))) {
-    return new Response(JSON.stringify({ error: 'Invalid target URL' }), {
-      status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const headers = {};
-  if (authorization) headers['Authorization'] = authorization;
-  if (body) headers['Content-Type'] = 'application/json';
-
-  try {
-    const init = { method, headers };
-    if (body) init.body = typeof body === 'string' ? body : JSON.stringify(body);
-
-    const response = await fetch(url, init);
-    const text = await response.text();
-
-    let data;
-    try { data = JSON.parse(text); } catch { data = { raw: text }; }
-
-    return new Response(JSON.stringify(data), {
-      status: response.status,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-};
+  const response = await fetch(targetUrl, {
+    headers: { 'Authorization': `Key ${falKey}` }
+  })
+  const data = await response.json()
+  return new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
