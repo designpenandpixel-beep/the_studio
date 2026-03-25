@@ -1,15 +1,34 @@
 export const prerender = false
 
+function getTargetUrl(request, contextUrl) {
+    // Try query param from Astro context first
+    const fromContext = contextUrl?.searchParams?.get('url')
+    if (fromContext) return fromContext
+    // Fallback: parse query param from request.url directly
+    try {
+        const parsed = new URL(request.url)
+        const fromRequest = parsed.searchParams.get('url')
+        if (fromRequest) return fromRequest
+    } catch {}
+    return null
+}
+
 export async function POST({ request, url }) {
-    const targetUrl = url.searchParams.get('url')
+    let targetUrl = getTargetUrl(request, url)
+    const body = await request.json()
+    const falKey = import.meta.env.FAL_KEY
+
+    // If URL wasn't in query params, check if it's in the body
+    if (!targetUrl && body.url) {
+      targetUrl = body.url
+    }
+
     if (!targetUrl) {
       return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
       })
     }
-    const body = await request.json()
-    const falKey = import.meta.env.FAL_KEY
 
   const response = await fetch(targetUrl, {
         method: 'POST',
@@ -17,7 +36,7 @@ export async function POST({ request, url }) {
                 'Authorization': `Key ${falKey}`,
                 'Content-Type': 'application/json'
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body.url ? (body.body || body) : body)
   })
     const text = await response.text()
     try {
@@ -34,8 +53,8 @@ export async function POST({ request, url }) {
     }
 }
 
-export async function GET({ url }) {
-    const targetUrl = url.searchParams.get('url')
+export async function GET({ request, url }) {
+    const targetUrl = getTargetUrl(request, url)
     if (!targetUrl) {
       return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
             status: 400,
