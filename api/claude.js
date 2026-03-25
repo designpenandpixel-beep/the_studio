@@ -1,51 +1,35 @@
-export const config = { runtime: 'edge' };
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version',
-};
-
-export default async function handler(req) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: CORS });
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = req.headers.get('x-api-key');
+  const apiKey = req.headers['x-api-key'];
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Missing API key' }), {
-      status: 400,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
+    return res.status(400).json({ error: 'Missing API key' });
   }
 
   try {
-    const body = await req.text();
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': req.headers.get('anthropic-version') || '2023-06-01',
+        'anthropic-version': req.headers['anthropic-version'] || '2023-06-01',
       },
-      body,
+      body: JSON.stringify(req.body),
     });
-    const text = await res.text();
-    return new Response(text, {
-      status: res.status,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
+
+    const data = await response.json();
+    return res.status(response.status).json(data);
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
+    return res.status(500).json({ error: e.message });
   }
 }
