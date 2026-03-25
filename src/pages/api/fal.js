@@ -8,12 +8,27 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-export async function OPTIONS() {
-  return new Response(null, { status: 200, headers: CORS });
-}
+export async function ALL({ request }) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: CORS });
+  }
 
-export async function POST({ request }) {
-  const { url, method = 'GET', body, authorization } = await request.json();
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Use POST' }), {
+      status: 405, headers: { ...CORS, 'Content-Type': 'application/json' },
+    });
+  }
+
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { url, method = 'GET', body, authorization } = payload;
 
   if (!url || !ALLOWED.some(p => url.startsWith(p))) {
     return new Response(JSON.stringify({ error: 'Invalid target URL' }), {

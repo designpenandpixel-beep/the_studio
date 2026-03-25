@@ -6,11 +6,17 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version',
 };
 
-export async function OPTIONS() {
-  return new Response(null, { status: 200, headers: CORS });
-}
+export async function ALL({ request }) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: CORS });
+  }
 
-export async function POST({ request }) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: { ...CORS, 'Content-Type': 'application/json' },
+    });
+  }
+
   const apiKey = request.headers.get('x-api-key');
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'Missing API key' }), {
