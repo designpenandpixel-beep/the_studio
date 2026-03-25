@@ -104,6 +104,14 @@ const IMG_MODELS=[
 ];
 const IMG_QUALITY=['standard','hd'];
 const IMG_TONES=['photorealistic','cinematic','illustration','editorial','minimal','vibrant','moody','warm','cool'];
+const WRITER_TYPES=[
+  {id:'film',n:'Film Writer',icon:'🎬',desc:'Cinematic storytelling, visual narratives, emotional arcs',sys:'You are an award-winning film scriptwriter. Write with cinematic depth, visual poetry, and emotional resonance. Focus on show-don\'t-tell, subtext, and powerful visual storytelling.'},
+  {id:'commercial',n:'Commercial Ad Writer',icon:'📺',desc:'Punchy, time-coded, brand-focused ad scripts',sys:'You are a senior TVC and digital ad scriptwriter at a top agency. Every second counts. Write punchy, precise, brand-driven scripts that sell. Time-coded, visual-first, emotionally compelling.'},
+  {id:'social_short',n:'Social Media (Short-form)',icon:'📱',desc:'Reels, TikTok, Shorts — hook-driven, fast-paced',sys:'You are a viral short-form content writer specializing in Instagram Reels, TikTok, and YouTube Shorts. Master the hook in 1 second, deliver value fast, end with a bang. Conversational, trend-aware, scroll-stopping.'},
+  {id:'youtube_long',n:'Long-form (YouTube)',icon:'🎥',desc:'Educational, documentary, or entertainment — structured for retention',sys:'You are an expert YouTube scriptwriter who understands retention curves. Write with strong hooks, pattern interrupts, open loops, and satisfying payoffs. Structure for 8-20 minute videos with chapters and visual cues.'},
+  {id:'brand_copy',n:'Brand Copywriter',icon:'✍',desc:'Brand voice, taglines, campaign messaging, tone of voice',sys:'You are a senior brand copywriter who crafts distinctive brand voices. Write copy that builds brand equity — taglines, manifestos, campaign lines, product descriptions. Every word carries the brand\'s personality.'},
+  {id:'auto',n:'Auto (Recommended)',icon:'✦',desc:'Automatically selects the best writer for your project type',sys:''}
+];
 const VIDEO_MODELS=[
   {id:'fal-ai/veo3',n:'Google Veo 3',s:'Dialogue, humans, cinematic',tags:['dialogue','cinematic'],c:'~$0.50–1.00/shot'},
   {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master',s:'Consistency, vehicles, stylized',tags:['consistency'],c:'~$0.20–0.40'},
@@ -3718,13 +3726,38 @@ ${r.preview?`<img src="${r.preview}" style="width:100%;aspect-ratio:4/3;object-f
 }
 
 // ── STEP 2: SYNOPSIS (EMPLOYEE/ADMIN) ──
+function getActiveWriter(p){
+  const wid=p.writerId||S.writerId||'auto';
+  if(wid==='auto'){
+    const autoMap={commercial_ad:'commercial',short_form:'social_short',social_media:'social_short',youtube:'youtube_long',documentary:'film',music_video:'film',brand:'brand_copy'};
+    const matched=autoMap[p.type]||'film';
+    return WRITER_TYPES.find(w=>w.id===matched)||WRITER_TYPES[0];
+  }
+  return WRITER_TYPES.find(w=>w.id===wid)||WRITER_TYPES[0];
+}
+function writerSelector(p){
+  const current=p.writerId||S.writerId||'auto';
+  const active=getActiveWriter(p);
+  return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:10px 14px;margin-bottom:12px">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+<span style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase">Writer Personality</span>
+<span style="font-size:8px;color:var(--gold);margin-left:auto">Active: ${active.icon} ${active.n}</span>
+</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap">
+${WRITER_TYPES.map(w=>`<button onclick="S.writerId='${w.id}';const pp=DB.getProject(S.pid);if(pp){pp.writerId='${w.id}';DB.saveProject(pp);}render()" style="background:${current===w.id?'#1a1000':'var(--bg3)'};border:1px solid ${current===w.id?'var(--gold)':'var(--b2)'};color:${current===w.id?'var(--gold)':'var(--t3)'};padding:5px 10px;border-radius:6px;cursor:pointer;font-size:9px;display:flex;align-items:center;gap:4px;transition:all 0.15s" title="${esc(w.desc)}"><span>${w.icon}</span><span style="font-weight:${current===w.id?'700':'400'}">${w.n}</span></button>`).join('')}
+</div>
+<div style="font-size:8px;color:var(--t4);margin-top:6px;line-height:1.4">${active.icon} <strong>${active.n}</strong> — ${active.desc}${current==='auto'?` (auto-selected for ${MT[p.type]?.label||'this project'})`:''}</div>
+</div>`;
+}
 function sSynopsis(p){
   const revs=p.synopsisRevisions||[];const latest=revs[revs.length-1];
   return`<div class="ptitle">Synopsis</div><div class="psub">Story-format synopsis for client review. Max 3 revisions.</div>
+${writerSelector(p)}
 <div class="btn-row" style="margin-bottom:12px">
 <button class="btn btn-outline btn-sm" onclick="genSynopsis()" id="btn-gen-syn">✦ (Re)generate</button>
 <span style="font-size:9px;color:var(--t4)">${revs.length} revision(s) · ${p.synopsisLocked?'<span style=\'color:var(--green)\'>Locked ✓</span>':'Pending client approval'}</span>
 </div>
+${latest?voiceReaderBar('synopsis',latest.text):''}
 <div class="ai-load" id="syn-load"><div class="spinner"></div>Generating synopsis...</div>
 ${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0a0800':'var(--bg3)'};border:1px solid ${i===revs.length-1?'#B8960C22':'var(--b1)'};border-radius:7px;padding:13px;margin-bottom:8px">
 <div style="font-size:9px;color:var(--t4);margin-bottom:6px;display:flex;justify-content:space-between">
@@ -3747,11 +3780,14 @@ async function genSynopsis(){
   if(S.stage===1&&S.step!==2){goStep(2);}
   document.getElementById('syn-load')?.classList.add('show');
   const brief=Object.entries({...p.clientBrief,...p.brief}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join('\n');
+  const writer=getActiveWriter(p);
+  const writerSys=writer.sys||'You are a creative director at a top media production agency. Write compelling creative synopses in vivid story format. No technical jargon.';
+  // Merge L&D skill training if writer has trained skills
+  const ldSkills=DB.getLDEntries().filter(e=>e.type==='skill'&&e.active&&(e.tags||[]).some(t=>t.includes(writer.id)||t.includes('writer')));
+  const skillContext=ldSkills.length?'\n\nTRAINED SKILLS:\n'+ldSkills.map(s=>s.title+': '+(s.description||'')).join('\n'):'';
   try{
     const r=await callClaude(
-      p.type==='commercial_ad'
-        ?'You are a senior creative director at a top advertising agency. Write creative synopses for clients who are not filmmakers. Use vivid story format - paint every scene, the music, the emotion, the product reveal moment. No technical jargon. Make the client excited to greenlight this.'
-        :'You are a creative director at a top media production agency. Write compelling creative synopses in vivid story format. No technical jargon.',
+      writerSys+' Write creative synopses for clients. Use vivid story format. Make the client excited to greenlight this.'+skillContext,
       p.type==='commercial_ad'
         ?`Write a creative synopsis for this Commercial Ad.\n\nCLIENT BRIEF:\n${brief}\n\nStructure as 4 vivid paragraphs:\n1. OPENING (0-3 sec): What does the viewer see and feel immediately?\n2. STORY ARC: How does the story unfold? What is the emotional journey?\n3. PRODUCT HERO MOMENT: How and when does the product/brand appear?\n4. CLOSING: The tagline, CTA, final image, and the feeling left with the viewer.\n\nWrite like a mini-film pitch. End with one sentence on the emotional impact.\n\nReturn ONLY the synopsis text.`
         :`Write a creative synopsis for this ${MT[p.type]?.label} project.\n\nBRIEF:\n${brief}\n\nWrite 2-3 engaging narrative paragraphs: the creative concept, story/structure, mood, visual direction, and the emotion the audience will feel. Make it exciting. End with the intended impact.\n\nReturn ONLY the synopsis text.`,
@@ -3779,6 +3815,7 @@ function sScript(p){
   const viewMode=p._scriptView||'formatted'; // 'formatted' | 'raw'
   return`<div class="ptitle">Script</div>
 <div class="psub">${isAd?'Time-coded commercial script — VISUAL | VO | SFX | SUPER format.':'Full production script.'}</div>
+${writerSelector(p)}
 ${isAd?`<div class="ib ib-gold" style="font-size:10px;line-height:1.7;margin-bottom:10px"><strong>Commercial Script Format:</strong> Each row = one timed beat. <code>[0:00–0:05] VISUAL | VO/DIALOGUE | SFX | SUPER</code></div>`:''}
 <!-- Action buttons -->
 <div class="btn-row" style="margin-bottom:10px">
@@ -3787,9 +3824,11 @@ ${isAd?`<div class="ib ib-gold" style="font-size:10px;line-height:1.7;margin-bot
 ${isAd&&hasScript?`<button class="btn btn-outline btn-sm" onclick="checkBrandCompliance()" id="btn-compliance">✓ Brand Check</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="showUploadScriptModal()" title="Upload your own script">↑ Upload Script</button>
 ${hasScript?`<button class="btn btn-ghost btn-sm" onclick="toggleScriptView()" id="btn-sv">${viewMode==='formatted'?'Raw':'Formatted'}</button>`:''}
+${hasScript?`<button class="btn btn-ghost btn-sm" onclick="showAnnotationsPanel()" title="View/add notes for script regeneration">📝 Notes${(p.scriptAnnotations||[]).length?' ('+p.scriptAnnotations.length+')':''}</button>`:''}
 <span id="sc-wc" style="font-size:9px;color:var(--t4);margin-left:auto">${hasScript?(p.script.split(/\s+/).filter(Boolean).length+' words'):''}</span>
 </div>
 <div class="ai-load" id="sc-load"><div class="spinner"></div>${isAd?'Writing commercial script...':'Writing script...'}</div>
+${hasScript?voiceReaderBar('script',p.script):''}
 <!-- Brand Compliance Panel -->
 ${isAd?`<div id="compliance-panel" style="display:${hasCompliance?'block':'none'};background:#050d08;border:1px solid #4ac04a33;border-radius:8px;padding:12px 14px;margin-bottom:12px">
 <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
@@ -3806,13 +3845,17 @@ ${p.complianceCheck?.result?.includes('NEEDS REVISION')?`<div style="margin-top:
 <!-- Script Display -->
 <div class="card"><div class="card-head"><span class="card-title">${isAd?'COMMERCIAL SCRIPT':'SCRIPT'}</span>
 <div style="display:flex;gap:5px">
+${hasScript?`<button class="btn btn-ghost btn-sm" onclick="toggleScriptBook()" id="btn-book">${S.scriptViewMode==='book'?'Editor':'📖 Book View'}</button>`:''}
+${hasScript?`<button class="btn btn-ghost btn-sm" onclick="openScriptFullscreen()">⛶ Fullscreen</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="copyText('script-ta')">Copy</button>
 <button class="btn btn-ghost btn-sm" onclick="expScript()">↓ Download</button>
 </div></div>
 <div class="card-body" style="padding:${isAd&&viewMode==='formatted'&&hasScript?'0':'13px'}">
+<!-- Book view -->
+${S.scriptViewMode==='book'&&hasScript?renderScriptBook(p.script):''}
 <!-- Formatted view for commercial ad -->
-${isAd&&viewMode==='formatted'&&hasScript?`<div id="script-formatted">${renderScriptTable(p.script)}</div><textarea id="script-ta" style="display:none" oninput="document.getElementById('sc-wc').textContent=this.value.split(/\\s+/).filter(Boolean).length+' words'">${esc(p.script||'')}</textarea>`:
-`<textarea id="script-ta" rows="28" style="font-family:${isAd?'monospace':'Arial,sans-serif'};font-size:${isAd?'10':'11'}px;line-height:1.7" oninput="document.getElementById('sc-wc').textContent=this.value.split(/\\s+/).filter(Boolean).length+' words'">${esc(p.script||'')}</textarea>`}
+${S.scriptViewMode!=='book'?(isAd&&viewMode==='formatted'&&hasScript?`<div id="script-formatted">${renderScriptTable(p.script)}</div><textarea id="script-ta" style="display:none" oninput="document.getElementById('sc-wc').textContent=this.value.split(/\\s+/).filter(Boolean).length+' words'">${esc(p.script||'')}</textarea>`:
+`<textarea id="script-ta" rows="28" style="font-family:${isAd?'monospace':'Arial,sans-serif'};font-size:${isAd?'10':'11'}px;line-height:1.7" oninput="document.getElementById('sc-wc').textContent=this.value.split(/\\s+/).filter(Boolean).length+' words'">${esc(p.script||'')}</textarea>`):'<textarea id="script-ta" style="display:none">${esc(p.script||"")}</textarea>'}
 </div></div>
 <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="goStep(2)">←</button><button class="btn btn-gold" onclick="genBible()">✦ Bible →</button></div>`;
 }
@@ -3879,6 +3922,150 @@ function renderScriptTable(script){
   return html;
 }
 
+// ── VOICE READER ──
+function voiceReaderBar(id,text){
+  if(!text||!window.speechSynthesis)return'';
+  const isPlaying=S._voicePlaying===id;
+  const isMuted=S._voiceMuted;
+  return`<div class="voice-bar">
+<button class="voice-btn${isPlaying?' active':''}" onclick="toggleVoiceRead('${id}')">
+${isPlaying?'⏸ Pause':'▶ Listen'}
+</button>
+<button class="voice-btn" onclick="stopVoiceRead()">⏹ Stop</button>
+<button class="voice-btn${isMuted?' active':''}" onclick="toggleVoiceMute()" title="${isMuted?'Unmute':'Mute'}">
+${isMuted?'🔇 Muted':'🔊 Sound'}
+</button>
+<div style="flex:1"></div>
+<select onchange="S._voiceRate=parseFloat(this.value)" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t2);padding:3px 6px;border-radius:4px;font-size:9px">
+<option value="0.8" ${S._voiceRate===0.8?'selected':''}>0.8x</option>
+<option value="1" ${!S._voiceRate||S._voiceRate===1?'selected':''}>1x</option>
+<option value="1.2" ${S._voiceRate===1.2?'selected':''}>1.2x</option>
+<option value="1.5" ${S._voiceRate===1.5?'selected':''}>1.5x</option>
+</select>
+<span style="font-size:8px;color:var(--t4)">Voice Reader</span>
+</div>`;
+}
+function toggleVoiceRead(id){
+  const synth=window.speechSynthesis;if(!synth)return;
+  if(synth.speaking&&S._voicePlaying===id){
+    if(synth.paused){synth.resume();S._voicePlaying=id;}
+    else{synth.pause();S._voicePlaying=null;}
+    render();return;
+  }
+  synth.cancel();
+  const p=DB.getProject(S.pid);if(!p)return;
+  let text='';
+  if(id==='synopsis'){const rev=p.synopsisRevisions?.slice(-1)[0];text=rev?.text||'';}
+  else if(id==='script'){text=p.script||'';}
+  if(!text){toast('Nothing to read','err');return;}
+  // Clean script markers for natural reading
+  text=text.replace(/\[[\d:–\-]+\]/g,'').replace(/\*\*/g,'').replace(/\|/g,',').substring(0,5000);
+  const utter=new SpeechSynthesisUtterance(text);
+  utter.rate=S._voiceRate||1;
+  utter.volume=S._voiceMuted?0:1;
+  utter.onend=()=>{S._voicePlaying=null;render();};
+  utter.onerror=()=>{S._voicePlaying=null;render();};
+  synth.speak(utter);
+  S._voicePlaying=id;render();
+}
+function stopVoiceRead(){window.speechSynthesis?.cancel();S._voicePlaying=null;render();}
+// ── SCRIPT ANNOTATIONS ──
+function showAnnotationsPanel(){
+  const p=DB.getProject(S.pid);if(!p)return;
+  const annotations=p.scriptAnnotations||[];
+  openModal(`<div class="modal-title">Script Notes & Annotations</div>
+<div style="font-size:10px;color:var(--t3);margin-bottom:12px;line-height:1.5">Add notes to specific parts of the script. These notes will be automatically included when regenerating the script (v2). Select text in the script, then add your note below.</div>
+<!-- Add new annotation -->
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;margin-bottom:14px">
+<div style="font-size:9px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:8px">Add New Note</div>
+<div class="fg"><label>Script text this note refers to (copy-paste or describe the section)</label>
+<textarea id="ann-text" rows="2" placeholder="e.g. The opening scene where the hero enters..." style="font-size:10px"></textarea></div>
+<div class="fg"><label>Your note / feedback</label>
+<textarea id="ann-note" rows="3" placeholder="e.g. Make this more dramatic, add a pause before the reveal..." style="font-size:10px"></textarea></div>
+<button class="btn btn-gold btn-sm" onclick="addAnnotation()">+ Add Note</button>
+</div>
+<!-- Existing annotations -->
+${annotations.length?`<div style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase;margin-bottom:8px">Existing Notes (${annotations.length})</div>
+${annotations.map((a,i)=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-left:3px solid var(--gold);border-radius:6px;padding:10px 12px;margin-bottom:6px">
+<div style="font-size:9px;color:var(--t4);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+<span>"${esc(a.text.substring(0,60))}${a.text.length>60?'…':''}"</span>
+<button onclick="removeAnnotation(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px">✕</button>
+</div>
+<div style="font-size:10px;color:var(--t2);line-height:1.5">${esc(a.note)}</div>
+</div>`).join('')}`:'<div style="font-size:10px;color:var(--t4);text-align:center;padding:12px">No annotations yet. Add notes above to guide script regeneration.</div>'}
+<div class="btn-row" style="margin-top:12px">
+${annotations.length?`<button class="btn btn-outline btn-sm" onclick="clearAnnotations()">Clear All Notes</button>`:''}
+<button class="btn btn-ghost" onclick="closeModal()">Close</button>
+</div>`);
+}
+function addAnnotation(){
+  const text=document.getElementById('ann-text')?.value.trim();
+  const note=document.getElementById('ann-note')?.value.trim();
+  if(!text||!note){toast('Both fields required','err');return;}
+  const p=DB.getProject(S.pid);if(!p)return;
+  if(!p.scriptAnnotations)p.scriptAnnotations=[];
+  p.scriptAnnotations.push({text,note,ts:new Date().toISOString()});
+  DB.saveProject(p);closeModal();showAnnotationsPanel();toast('Note added!','ok');
+}
+function removeAnnotation(i){
+  const p=DB.getProject(S.pid);if(!p)return;
+  (p.scriptAnnotations||[]).splice(i,1);
+  DB.saveProject(p);closeModal();showAnnotationsPanel();
+}
+function clearAnnotations(){
+  if(!confirm('Clear all script notes?'))return;
+  const p=DB.getProject(S.pid);if(!p)return;
+  p.scriptAnnotations=[];DB.saveProject(p);closeModal();render();toast('Notes cleared','ok');
+}
+
+function toggleVoiceMute(){
+  S._voiceMuted=!S._voiceMuted;
+  if(window.speechSynthesis?.speaking){
+    // Can't change volume mid-utterance, so restart
+    const id=S._voicePlaying;stopVoiceRead();
+    if(id)setTimeout(()=>toggleVoiceRead(id),100);
+  }
+  render();
+}
+
+function toggleScriptBook(){S.scriptViewMode=S.scriptViewMode==='book'?'editor':'book';render();}
+function renderScriptBook(script){
+  if(!script)return'';
+  const CHARS_PER_PAGE=1200;
+  const paragraphs=script.split('\n\n');
+  const pages=[];let current='';
+  for(const para of paragraphs){
+    if((current+'\n\n'+para).length>CHARS_PER_PAGE&&current){pages.push(current.trim());current=para;}
+    else{current+=(current?'\n\n':'')+para;}
+  }
+  if(current.trim())pages.push(current.trim());
+  if(!pages.length)pages.push(script);
+  S._bookPages=pages.length;S._bookPage=S._bookPage||0;
+  if(S._bookPage>=pages.length)S._bookPage=pages.length-1;
+  return`<div class="book-view"><div class="book-pages" style="min-height:480px">
+${pages.map((pg,i)=>`<div class="book-page${i<S._bookPage?' flipped':''}${i>S._bookPage?' hidden':''}" id="bkp-${i}">
+<div style="white-space:pre-wrap;word-break:break-word">${esc(pg)}</div>
+<div class="page-num">${i+1} / ${pages.length}</div>
+</div>`).join('')}
+</div></div>
+<div class="book-nav">
+<button onclick="flipBookPage(-1)" ${S._bookPage<=0?'disabled':''}>← Previous</button>
+<span>Page ${(S._bookPage||0)+1} of ${pages.length}</span>
+<button onclick="flipBookPage(1)" ${S._bookPage>=pages.length-1?'disabled':''}>Next →</button>
+</div>`;
+}
+function flipBookPage(dir){
+  const newPage=(S._bookPage||0)+dir;
+  if(newPage<0||newPage>=(S._bookPages||1))return;
+  S._bookPage=newPage;render();
+}
+function openScriptFullscreen(){
+  const p=DB.getProject(S.pid);if(!p?.script)return;
+  const el=document.createElement('div');el.className='script-fullscreen';el.id='script-fs-overlay';
+  el.innerHTML=`<button class="close-fs" onclick="document.getElementById('script-fs-overlay').remove()">✕ Close</button>
+${renderScriptBook(p.script)}`;
+  document.body.appendChild(el);
+}
 function toggleScriptView(){
   const p=DB.getProject(S.pid);if(!p)return;
   p._scriptView=p._scriptView==='formatted'?'raw':'formatted';
@@ -4046,14 +4233,20 @@ async function checkBrandCompliance(){
   if(btn){btn.disabled=false;btn.textContent='\u2713 Brand Check';}
 }
 async function genScript(){saveInputs();const p=DB.getProject(S.pid);if(!p)return;if(!kC()){toast('Enter API key','err');return}document.getElementById('sc-load')?.classList.add('show');const mt=MT[p.type];const brief=Object.entries({...p.clientBrief,...p.brief}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join('\n');const syn=p.synopsisRevisions?.slice(-1)[0]?.text||'';
+  const writer=getActiveWriter(p);
+  const ldSkills=DB.getLDEntries().filter(e=>e.type==='skill'&&e.active&&(e.tags||[]).some(t=>t.includes(writer.id)||t.includes('writer')));
+  const skillCtx=ldSkills.length?'\n\nTRAINED SKILLS:\n'+ldSkills.map(s=>s.title+': '+(s.description||'')).join('\n'):'';
+  // Include script annotations/notes from previous version
+  const annotations=(p.scriptAnnotations||[]).map(a=>`[Note at "${a.text.substring(0,30)}..."]: ${a.note}`).join('\n');
+  const annotCtx=annotations?'\n\nUSER NOTES FROM PREVIOUS VERSION (address these):\n'+annotations:'';
 try{
     let sysP,usrP;
     if(p.type==='commercial_ad'){
-      sysP='You are a senior TVC and digital ad scriptwriter. Write time-coded commercial scripts in industry format. Every second counts. Be precise, cinematic, punchy.';
-      usrP='Write a complete production-ready script for this commercial.\n\nPROJECT: '+p.name+'\nBRIEF:\n'+brief+(syn?'\nAPPROVED SYNOPSIS:\n'+syn:'')+'\n\nFORMAT: Use time codes [0:00-0:03]. Four columns per beat: VISUAL | VO/DIALOGUE | SFX/MUSIC | SUPER\nVISUAL = one-line shot description. VO = exact words or none. SFX = music/sound descriptor. SUPER = on-screen text or none.\nEnd with PACK SHOT / LOGO CARD beat. Total must match specified duration.\nStart with one-line concept note, then the full timed script.\n\nReturn ONLY the script text.';
+      sysP=writer.sys||'You are a senior TVC and digital ad scriptwriter. Write time-coded commercial scripts in industry format. Every second counts. Be precise, cinematic, punchy.';
+      usrP='Write a complete production-ready script for this commercial.\n\nPROJECT: '+p.name+'\nBRIEF:\n'+brief+(syn?'\nAPPROVED SYNOPSIS:\n'+syn:'')+annotCtx+'\n\nFORMAT: Use time codes [0:00-0:03]. Four columns per beat: VISUAL | VO/DIALOGUE | SFX/MUSIC | SUPER\nVISUAL = one-line shot description. VO = exact words or none. SFX = music/sound descriptor. SUPER = on-screen text or none.\nEnd with PACK SHOT / LOGO CARD beat. Total must match specified duration.\nStart with one-line concept note, then the full timed script.\n\nReturn ONLY the script text.';
     } else {
-      sysP='You are a professional '+( mt?.label||'media')+' scriptwriter. Write complete, production-ready scripts.';
-      usrP='Project: '+p.name+' ('+( mt?.label||'')+')\nBRIEF:\n'+brief+(syn?'\nSYNOPSIS:\n'+syn:'')+'\n\nWrite the complete script with all scenes, dialogue, VO, and visual cues. Include proper formatting.';
+      sysP=(writer.sys||'You are a professional '+( mt?.label||'media')+' scriptwriter.')+' Write complete, production-ready scripts.'+skillCtx;
+      usrP='Project: '+p.name+' ('+( mt?.label||'')+')\nBRIEF:\n'+brief+(syn?'\nSYNOPSIS:\n'+syn:'')+annotCtx+'\n\nWrite the complete script with all scenes, dialogue, VO, and visual cues. Include proper formatting.';
     }
     const r=await callClaude(sysP,usrP,4000);
     document.getElementById('script-ta').value=r;
@@ -4065,16 +4258,66 @@ try{
 // ── STEP 4: BIBLE ──
 function sBible(p){
   const bible=p.bible||{};
+  const secIcons={cast:'🎭',characters:'👤',locations:'📍',product_hero:'📦',props:'🎬',brand_elements:'✦'};
+  const sections=p.type==='commercial_ad'?['cast','locations','product_hero','props','brand_elements']:['characters','locations','props'];
+  const hasBible=sections.some(sec=>Array.isArray(bible[sec])&&bible[sec].length);
   return`<div class="ptitle">Production Bible</div><div class="psub">Visual anchors for consistency — characters, locations, props.</div>
 <div class="btn-row" style="margin-bottom:10px"><button class="btn btn-gold" onclick="genBible()" id="btn-gen-bi">✦ Generate</button><button class="btn btn-ghost btn-sm" onclick="goStep(3)">← Script</button></div>
 <div class="ai-load" id="bi-load"><div class="spinner"></div>Building bible...</div>
-${(p.type==='commercial_ad'?['cast','locations','product_hero','props','brand_elements']:['characters','locations','props']).map(sec=>`<div class="section-lbl">${sec.replace(/_/g,' ')}</div>
-<div class="bible-grid">
-${Array.isArray(bible[sec])?bible[sec].map((item,i)=>`<div class="bic"><div class="bic-top"><span class="bic-title">${esc(item.name||item.feature||item.location||sec+'_'+i)}</span></div>
-${Object.keys(item).filter(k=>k!=='name').map(k=>`<div style="padding:1px 10px 0;font-size:8px;color:var(--t4);text-transform:uppercase">${k}</div><textarea data-bible="${sec}.${i}.${k}" rows="2">${esc(typeof item[k]==='string'?item[k]:JSON.stringify(item[k]))}</textarea>`).join('')}
-</div>`).join(''):'<div style="color:var(--t4);font-size:9px;padding:6px">Not generated yet.</div>'}
+${sections.map(sec=>{
+  const items=Array.isArray(bible[sec])?bible[sec]:[];
+  if(!items.length)return`<div class="section-lbl">${secIcons[sec]||'?'} ${sec.replace(/_/g,' ')}</div><div style="color:var(--t4);font-size:9px;padding:6px 0 12px">Not generated yet.</div>`;
+  const carId='bc-'+sec;
+  return`<div class="section-lbl" style="display:flex;align-items:center;gap:6px">${secIcons[sec]||'?'} ${sec.replace(/_/g,' ')} <span style="font-size:8px;color:var(--t4);font-weight:400">(${items.length})</span></div>
+<div class="bible-carousel" id="${carId}">
+<button class="carousel-nav prev" onclick="scrollCarousel('${carId}',-1)">‹</button>
+<button class="carousel-nav next" onclick="scrollCarousel('${carId}',1)">›</button>
+<div class="bible-track" id="${carId}-track">
+${items.map((item,i)=>{
+  const keys=Object.keys(item).filter(k=>k!=='name');
+  return`<div class="bible-card">
+<div class="bible-card-head">
+<div class="card-icon">${secIcons[sec]||'?'}</div>
+<h4>${esc(item.name||item.feature||item.location||item.element||sec+'_'+i)}</h4>
+</div>
+<div class="bible-card-body">
+${keys.map(k=>`<div class="field">
+<div class="field-label">${k.replace(/_/g,' ')}</div>
+<textarea data-bible="${sec}.${i}.${k}" rows="${k==='ai_prompt_anchor'||k==='description'?3:2}">${esc(typeof item[k]==='string'?item[k]:JSON.stringify(item[k]))}</textarea>
 </div>`).join('')}
+</div>
+</div>`;}).join('')}
+</div>
+<div class="carousel-dots" id="${carId}-dots">
+${items.map((_,i)=>`<div class="dot${i===0?' active':''}" onclick="scrollCarouselTo('${carId}',${i})"></div>`).join('')}
+</div>
+</div>`;}).join('')}
+${!hasBible?`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:8px;padding:30px;text-align:center;color:var(--t4)">
+<div style="font-size:18px;margin-bottom:8px">📖</div>
+<div style="font-size:11px">No production bible yet. Generate from your script above.</div>
+</div>`:''}
 <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="goStep(3)">←</button><button class="btn btn-gold" onclick="genShots()">✦ Generate Shots →</button></div>`;
+}
+function scrollCarousel(carId,dir){
+  const track=document.getElementById(carId+'-track');if(!track)return;
+  const cardW=294;// 280 + 14 gap
+  const current=track.scrollLeft||0;
+  const newPos=current+(dir*cardW);
+  track.style.overflow='auto';
+  track.scrollTo({left:Math.max(0,newPos),behavior:'smooth'});
+  // Update dots
+  setTimeout(()=>{
+    const idx=Math.round(track.scrollLeft/cardW);
+    const dots=document.getElementById(carId+'-dots');
+    if(dots)dots.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===idx));
+  },450);
+}
+function scrollCarouselTo(carId,idx){
+  const track=document.getElementById(carId+'-track');if(!track)return;
+  track.style.overflow='auto';
+  track.scrollTo({left:idx*294,behavior:'smooth'});
+  const dots=document.getElementById(carId+'-dots');
+  if(dots)dots.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===idx));
 }
 async function genBible(){saveInputs();const p=DB.getProject(S.pid);if(!p)return;if(!kC()){toast('Enter API key','err');return}goStep(4);document.getElementById('bi-load')?.classList.add('show');const mt=MT[p.type];const brief=Object.entries({...p.clientBrief,...p.brief}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join('\n');
 try{
