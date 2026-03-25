@@ -1,6 +1,6 @@
 export const prerender = false;
 
-const ALLOWED = ['https://queue.fal.run/', 'https://rest.fal.run/'];
+const ALLOWED = ['https://queue.fal.run/', 'https://rest.fal.run/', 'https://fal.run/'];
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
