@@ -2234,7 +2234,7 @@ async function ldRefImagesSelected(input){
 async function uploadFileToFal(file){
   const k=kF();if(!k)throw new Error('No fal.ai key');
   // Step 1: get upload URL from fal.ai
-  const initResp=await fetch('https://rest.fal.run/storage/upload/initiate',{
+  const initResp=await falFetch('https://rest.fal.run/storage/upload/initiate',{
     method:'POST',
     headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},
     body:JSON.stringify({file_name:file.name,content_type:file.type||'application/octet-stream'})
@@ -2243,7 +2243,7 @@ async function uploadFileToFal(file){
     // Fallback: try direct upload to fal storage
     const formData=new FormData();
     formData.append('file',file);
-    const directResp=await fetch('https://rest.fal.run/storage/upload',{
+    const directResp=await falFetch('https://rest.fal.run/storage/upload',{
       method:'POST',
       headers:{'Authorization':'Key '+k},
       body:formData
@@ -2357,7 +2357,7 @@ async function startLoRATraining(id){
   if(statusEl){statusEl.style.display='block';statusEl.textContent='Submitting training job to fal.ai…';}
   try{
     const images_data_url=urls;
-    const r=await fetch('https://queue.fal.run/fal-ai/flux-lora-fast-training',{
+    const r=await falFetch('https://queue.fal.run/fal-ai/flux-lora-fast-training',{
       method:'POST',
       headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},
       body:JSON.stringify({images_data_url,trigger_word:trigger,steps,create_masks:true,is_style:true,is_input_format_already_preprocessed:false})
@@ -2378,10 +2378,10 @@ async function checkLoRAStatus(id){
   const e=DB.getLDEntry(id);if(!e||!e.lora_training_job)return;
   const k=kF();if(!k)return;
   try{
-    const r=await fetch('https://queue.fal.run/fal-ai/flux-lora-fast-training/requests/'+e.lora_training_job+'/status',{headers:{'Authorization':'Key '+k}});
+    const r=await falFetch('https://queue.fal.run/fal-ai/flux-lora-fast-training/requests/'+e.lora_training_job+'/status',{headers:{'Authorization':'Key '+k}});
     const d=await r.json();
     if(d.status==='COMPLETED'){
-      const rr=await fetch('https://queue.fal.run/fal-ai/flux-lora-fast-training/requests/'+e.lora_training_job,{headers:{'Authorization':'Key '+k}});
+      const rr=await falFetch('https://queue.fal.run/fal-ai/flux-lora-fast-training/requests/'+e.lora_training_job,{headers:{'Authorization':'Key '+k}});
       const rd=await rr.json();
       const loraPath=rd.diffusers_lora_file?.url||rd.lora_file?.url||'';
       const updated={...e,lora_status:'ready',lora_model_id:loraPath};
@@ -5008,6 +5008,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
+function falFetch(url,init){return fetch('/api/fal?url='+encodeURIComponent(url),init);}
 async function falImg(prompt){
   const k=kF();if(!k)throw new Error('No fal.ai key');const rat=document.getElementById('s-rat')?.value||'16:9';
   // Check for active LoRA from selected trends
@@ -5021,10 +5022,10 @@ async function falImg(prompt){
     const sizeMap={'21:9':'landscape_16_9','16:9':'landscape_16_9','4:3':'landscape_4_3','1:1':'square_hd','9:16':'portrait_16_9','3:4':'portrait_4_3'};
     body={prompt,image_size:sizeMap[rat]||'landscape_16_9',output_format:'jpeg',loras:activeLoras.map(e=>({path:e.lora_model_id,scale:0.85})),model_name:'dev'};
   }
-  const r=await fetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await falFetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
-  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await fetch(`https://queue.fal.run/${model}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await fetch(`https://queue.fal.run/${model}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await falFetch(`https://queue.fal.run/${model}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(`https://queue.fal.run/${model}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
 }
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
@@ -5032,17 +5033,17 @@ async function falImgI2I(imgUrl,prompt,strength){
   const rat=document.getElementById('s-rat')?.value||'1:1';
   const model='fal-ai/flux-pro/kontext';
   const body={image_url:imgUrl,prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
-  const r=await fetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await falFetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error(`fal i2i ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
-  for(let i=0;i<120;i++){await sleep(2200);const rs=await fetch(`https://queue.fal.run/${model}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await fetch(`https://queue.fal.run/${model}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);const rs=await falFetch(`https://queue.fal.run/${model}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(`https://queue.fal.run/${model}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
 }
 async function falVid(imgUrl,prompt,dur,ratio){
   const k=kF();if(!k)throw new Error('No fal.ai key');if(!S.vidModel)throw new Error('No model');
-  const r=await fetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur),aspect_ratio:ratio})});
+  const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur),aspect_ratio:ratio})});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
-  for(let i=0;i<120;i++){if(S.stopVid)throw new Error('Stopped');await sleep(3000);const rs=await fetch(`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await fetch(`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.video?.url||rd.videos?.[0]?.url;if(!u)throw new Error('No video URL');return u}if(ds.status==='FAILED')throw new Error('Video generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){if(S.stopVid)throw new Error('Stopped');await sleep(3000);const rs=await falFetch(`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}/status`,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}`,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.video?.url||rd.videos?.[0]?.url;if(!u)throw new Error('No video URL');return u}if(ds.status==='FAILED')throw new Error('Video generation failed');}throw new Error('Timeout');
 }
 async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!b64)return{pass:true};const r=await callClaude('Evaluate images. JSON only: {"score":1-10,"pass":true/false}',`Score 1-10 (pass if >= ${thresh}). Prompt: ${prompt.substring(0,120)}`,200,b64,'image/jpeg');const d=JSON.parse(r.replace(/```json|```/g,'').trim());return{score:d.score||5,pass:d.pass!==undefined?d.pass:(d.score||5)>=thresh};}catch(e){return{pass:true};}}
 
