@@ -19,22 +19,22 @@ export default async function handler(req, res) {
   const auth = req.headers['authorization'];
   if (auth) headers['Authorization'] = auth;
 
-  try {
-    const init = { method: req.method, headers };
-    if (req.method === 'POST') {
-      headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(req.body);
-    }
+  const init = { method: req.method, headers };
 
+  if (req.method === 'POST' || req.method === 'PUT') {
+    headers['Content-Type'] = 'application/json';
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks).toString();
+    init.body = rawBody || '{}';
+  }
+
+  try {
     const response = await fetch(target, init);
     const text = await response.text();
 
     let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { raw: text };
-    }
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     return res.status(response.status).json(data);
   } catch (e) {
