@@ -2,35 +2,27 @@ const ALLOWED = ['https://queue.fal.run/', 'https://rest.fal.run/'];
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Use POST' });
 
-  const target = req.query.url;
+  const { url, method = 'GET', body, authorization } = req.body || {};
 
-  if (!target || !ALLOWED.some(prefix => target.startsWith(prefix))) {
+  if (!url || !ALLOWED.some(p => url.startsWith(p))) {
     return res.status(400).json({ error: 'Invalid target URL' });
   }
 
   const headers = {};
-  const auth = req.headers['authorization'];
-  if (auth) headers['Authorization'] = auth;
-
-  const init = { method: req.method, headers };
-
-  if (req.method === 'POST' || req.method === 'PUT') {
-    headers['Content-Type'] = 'application/json';
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const rawBody = Buffer.concat(chunks).toString();
-    init.body = rawBody || '{}';
-  }
+  if (authorization) headers['Authorization'] = authorization;
+  if (body) headers['Content-Type'] = 'application/json';
 
   try {
-    const response = await fetch(target, init);
+    const init = { method, headers };
+    if (body) init.body = typeof body === 'string' ? body : JSON.stringify(body);
+
+    const response = await fetch(url, init);
     const text = await response.text();
 
     let data;

@@ -5042,7 +5042,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){return fetch('/api/fal?url='+encodeURIComponent(url),init);}
+function falFetch(url,init){const method=(init&&init.method)||'GET';const auth=(init&&init.headers&&(init.headers['Authorization']||init.headers['authorization']))||'';let body=undefined;if(init&&init.body){try{body=JSON.parse(init.body);}catch{body=init.body;}}return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,authorization:auth})});}
 async function falImg(prompt){
   const k=kF();if(!k)throw new Error('No fal.ai key');const rat=document.getElementById('s-rat')?.value||'16:9';
   // Check for active LoRA from selected trends
