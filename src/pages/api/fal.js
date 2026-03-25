@@ -1,32 +1,29 @@
 export const prerender = false
 
-async function handleRequest(request) {
-    const reqUrl = new URL(request.url)
-    const targetUrl = reqUrl.searchParams.get('url')
-    if (!targetUrl) {
-      return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
+export async function POST({ request }) {
+    const { url, method = 'POST', body, authorization } = await request.json()
+
+    if (!url) {
+      return new Response(JSON.stringify({ error: 'Missing url' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
       })
     }
 
     const falKey = import.meta.env.FAL_KEY
-    const bodyText = await request.text()
-    const hasBody = bodyText.length > 0
-
-    // No body = GET (status polling / result fetch)
-    // Has body = POST (job submission)
     const options = {
-      method: hasBody ? 'POST' : 'GET',
-      headers: { 'Authorization': `Key ${falKey}` }
+      method,
+      headers: {
+              'Authorization': falKey ? `Key ${falKey}` : authorization,
+              'Content-Type': 'application/json'
+      }
     }
 
-    if (hasBody) {
-      options.headers['Content-Type'] = 'application/json'
-      options.body = bodyText
+    if (method !== 'GET' && body) {
+      options.body = JSON.stringify(body)
     }
 
-    const response = await fetch(targetUrl, options)
+    const response = await fetch(url, options)
     const text = await response.text()
     try {
       const data = JSON.parse(text)
@@ -40,12 +37,4 @@ async function handleRequest(request) {
             headers: { 'Content-Type': 'application/json' }
       })
     }
-}
-
-export async function POST(context) {
-    return handleRequest(context.request)
-}
-
-export async function GET(context) {
-    return handleRequest(context.request)
 }
