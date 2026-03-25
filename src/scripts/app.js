@@ -2285,9 +2285,9 @@ async function extractLDStyle(id){
   }
   if(url){
     try{
-      const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      const resp=await fetch('/api/claude',{
         method:'POST',
-        headers:{'apikey':kC(),'Authorization':'Bearer '+kC(),'Content-Type':'application/json'},
+        headers:{'x-api-key':kC(),'anthropic-version':'2023-06-01','Content-Type':'application/json'},
         body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:'Fetch and summarise this URL content for visual style extraction: '+url+'. If you cannot access it, describe the expected content style based on the URL.'}]})
       });
       const d=await resp.json();
@@ -4999,8 +4999,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
   if(proxyUrl&&sbKey){
     r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
   }else{
-    // Direct fallback (works on localhost, fails on GitHub Pages due to CORS)
-    r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
+    r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
   }
   const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
 }
