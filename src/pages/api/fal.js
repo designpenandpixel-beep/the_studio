@@ -8,22 +8,16 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-export async function ALL({ request }) {
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: CORS });
-  }
+export const OPTIONS = async () => {
+  return new Response(null, { status: 200, headers: CORS });
+};
 
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Use POST' }), {
-      status: 405, headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-
+export const POST = async ({ request }) => {
   let payload;
   try {
     payload = await request.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
       status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
     });
   }
@@ -59,4 +53,4 @@ export async function ALL({ request }) {
       status: 500, headers: { ...CORS, 'Content-Type': 'application/json' },
     });
   }
-}
+};
