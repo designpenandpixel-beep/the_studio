@@ -5030,9 +5030,8 @@ async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
   const k=kF();if(!k)throw new Error('No fal.ai key');
   const rat=document.getElementById('s-rat')?.value||'1:1';
-  const str=strength||0.65;
-  const model='fal-ai/flux-pro/v1.1-ultra/image-to-image';
-  const body={image_url:imgUrl,prompt,strength:str,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6',num_inference_steps:28};
+  const model='fal-ai/flux-pro/kontext';
+  const body={image_url:imgUrl,prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
   const r=await fetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error(`fal i2i ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
