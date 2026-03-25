@@ -527,7 +527,7 @@ function render(){
   const sb=document.getElementById('sbar');
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
-  app.innerHTML=appBarHTML()+mainHTML();
+  app.innerHTML='<div class="app-layout">'+appBarHTML()+'<div class="app-main"><div class="app-topbar">'+appTopBarHTML()+'</div><div class="app-content">'+mainHTML()+'</div></div></div>';
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -568,45 +568,80 @@ function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashb
 // ══════════════════════════════════════
 // APP BAR
 // ══════════════════════════════════════
-function appBarHTML(){
+function appTopBarHTML(){
   const r=S.session?.role;
-  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
-  const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
-  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
-  const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
-  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
-  return`<div class="app-bar">
-<div class="logo">The <span>Studio</span></div>
-<div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
-<span class="rb-${r}">${roleLabel}</span>
-<span class="app-bar-name">${S.session?.name}</span>
-<nav class="app-bar-nav">
-${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
-${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
-</nav>
-<div class="app-bar-right">
-${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
-  <div style="display:flex;gap:4px;align-items:center">
-    <span style="font-size:9px;color:var(--t3)">API Keys</span>
-    <div style="display:flex;gap:3px"><div class="kdot${getKey('claude')?' ok':''}" title="Claude"></div><div class="kdot${getKey('fal')?' ok':''}" title="fal.ai"></div><div class="kdot${getKey('el')?' ok':''}" title="ElevenLabs"></div></div>
-  </div>
+  const tabLabels={dashboard:'Dashboard',projects:'All Projects',timeline:'Timeline',clients:'Clients',creators:'Creators',integrations:'Integrations',ld:'L&D',leads:'Leads',settings:'Settings',studio:'Studio','my projects':'My Projects',new:'New Request',assets:'Brand Assets',inbox:'Inbox'};
+  const currentLabel=tabLabels[S.tab]||S.tab;
+  return`<div class="app-topbar-left">
+<span class="app-breadcrumb">The Studio <span style="color:var(--t4);margin:0 6px">/</span> <span>${esc(currentLabel)}</span></span>
+</div>
+<div class="app-topbar-right">
+${r==='admin'?`<button class="btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
+  <div style="display:flex;gap:5px;align-items:center"><span style="font-size:11px;color:var(--t3)">API</span><div style="display:flex;gap:3px"><div class="kdot${getKey('claude')?' ok':''}" title="Claude"></div><div class="kdot${getKey('fal')?' ok':''}" title="fal.ai"></div><div class="kdot${getKey('el')?' ok':''}" title="ElevenLabs"></div></div></div>
 </button>`:''}
 <div style="position:relative;display:inline-flex;align-items:center">
 <button onclick="toggleNotifPanel()" class="notif-btn" title="Notifications">
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
   <div id="notif-badge" class="notif-count" style="display:none"></div>
 </button>
 </div>
-<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
-</div>
-<div id="notif-panel" style="display:none;position:fixed;top:46px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:9px;z-index:300;overflow:hidden;box-shadow:0 8px 24px #000a">
-<div style="padding:9px 13px;background:var(--bg4);border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center">
-<span style="font-size:11px;font-weight:700;color:var(--gold)">Notifications</span>
-<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer">Mark all read</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:14px;cursor:pointer">✕</button></div>
+<div id="notif-panel" style="display:none;position:fixed;top:52px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:10px;z-index:300;overflow:hidden;box-shadow:0 8px 32px #000c">
+<div style="padding:10px 14px;background:var(--bg4);border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:12px;font-weight:700;color:var(--t1)">Notifications</span>
+<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:10px;cursor:pointer">Mark all read</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:16px;cursor:pointer;line-height:1">✕</button></div>
 </div>
 <div id="notif-list" style="overflow-y:auto;max-height:380px"></div>
 </div>`;
+}
+
+function appBarHTML(){
+  const r=S.session?.role;
+  const adminNav=[
+    {k:'dashboard',l:'Dashboard',i:'⊞'},
+    {k:'projects',l:'All Projects',i:'◧'},
+    {k:'timeline',l:'Timeline',i:'▤'},
+    {k:'clients',l:'Clients',i:'◉'},
+    {k:'creators',l:'Creators',i:'◈'},
+    {k:'integrations',l:'Integrations',i:'⬡'},
+    {k:'ld',l:'L&D',i:'◎'},
+    {k:'leads',l:'Leads',i:'◆'},
+    {k:'settings',l:'Settings',i:'⚙'},
+  ];
+  const creatorNav=[
+    {k:'dashboard',l:'My Projects',i:'⊞'},
+    {k:'clients',l:'My Clients',i:'◉'},
+    {k:'inbox',l:'Inbox',i:'✉'},
+  ];
+  const clientNav=[
+    {k:'dashboard',l:'My Projects',i:'⊞'},
+    {k:'new',l:'New Request',i:'＋'},
+    {k:'assets',l:'Brand Assets',i:'◧'},
+  ];
+  const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
+  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
+  const initials=(S.session?.name||'?').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+
+  return`<aside class="sidebar">
+<div class="sb-logo-wrap">
+  <div class="sb-logo">The <span>Studio</span></div>
+  <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')" style="cursor:pointer"></div>
+</div>
+<div class="sb-user-wrap">
+  <div class="uav uav-${r}" style="flex-shrink:0">${initials}</div>
+  <div style="flex:1;min-width:0">
+    <div class="sb-user-name">${esc(S.session?.name||'')}</div>
+    <div class="sb-user-role">${roleLabel}</div>
+  </div>
+</div>
+<nav class="sb-nav">
+${nav.map(t=>`<button class="sb-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')"><span class="sb-icon">${t.i}</span>${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge" style="margin-left:auto">${getUnreadCount()}</span>`:''}</button>`).join('')}
+${(r==='admin'||r==='creator')&&S.pid?`<button class="sb-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')"><span class="sb-icon">◈</span>Studio</button>`:''}
+</nav>
+<div class="sb-footer">
+  <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start" onclick="doLogout()">Sign Out</button>
+</div>
+</aside>`;
 }
 
 function getKey(k){const u=DB.getUser(S.session?.userId);return u?.apiKeys?.[k]||''}
