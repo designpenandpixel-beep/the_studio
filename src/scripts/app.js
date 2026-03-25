@@ -570,7 +570,7 @@ function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashb
 // ══════════════════════════════════════
 function appBarHTML(){
   const r=S.session?.role;
-  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'settings',l:'Settings'}];
+  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
   const clientNav=[{k:'dashboard',l:'My Projects'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
@@ -643,6 +643,7 @@ function adminMain(){
   if(S.tab==='timeline')return adminTimeline();
   if(S.tab==='integrations')return adminIntegrations();
   if(S.tab==='ld')return adminLD();
+  if(S.tab==='leads')return adminLeads();
   if(S.tab==='settings')return adminSettings();
   return adminDashboard();
 }
@@ -2624,6 +2625,107 @@ async function persistAllBase64Assets(){
   toast(count+' assets uploaded to imgbb!','ok');
   render();
 }
+// ══ ADMIN LEADS ══
+function adminLeads(){
+  const ltab=S.leadsTab||'demo';
+  const demos=S.leadsData?.demos||null;
+  const enqs=S.leadsData?.enquiries||null;
+  const loading=S.leadsLoading;
+  function statusBadge(s){const map={pending:'var(--gold)',contacted:'var(--blue)',converted:'var(--green)',closed:'var(--t4)'};return`<span style="font-size:8px;background:${(map[s]||'var(--t4)')}22;color:${map[s]||'var(--t4)'};border:1px solid ${(map[s]||'var(--t4)')}44;padding:2px 7px;border-radius:8px;text-transform:uppercase;font-weight:700">${s||'pending'}</span>`;}
+  function fmtDate(d){if(!d)return'—';const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}
+  function demoRows(){
+    if(!demos)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
+    if(!demos.length)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No demo requests yet</td></tr>`;
+    return demos.map((d,i)=>`<tr>
+<td style="font-size:10px;color:#fff;font-weight:600">${esc(d.name||'—')}</td>
+<td style="font-size:9px;color:var(--t3)">${esc(d.email||'—')}</td>
+<td style="font-size:9px;color:var(--t4)">${esc(d.company||'—')}</td>
+<td style="font-size:9px;color:var(--t3)">${esc(d.role||'—')}</td>
+<td style="font-size:9px;color:var(--t4)">${Array.isArray(d.project_types)?d.project_types.join(', '):(d.project_types||'—')}</td>
+<td style="font-size:9px;color:var(--gold);font-family:monospace">${fmtDate(d.demo_date)}${d.demo_time?'<br><span style=\'color:var(--t4)\'>'+esc(d.demo_time)+'</span>':''}</td>
+<td>${statusBadge(d.status||'pending')}</td>
+<td><div style="display:flex;gap:3px;flex-wrap:wrap">
+<button class="btn btn-ghost btn-sm" style="font-size:8px" onclick="leadsSetStatus('demo',${i},'contacted')">Contacted</button>
+<button class="btn btn-ghost btn-sm" style="font-size:8px;color:var(--green)" onclick="leadsSetStatus('demo',${i},'converted')">Converted</button>
+<button class="btn btn-ghost btn-sm" style="font-size:8px;color:var(--t4)" onclick="leadsAddNote('demo',${i})">Note</button>
+</div>${d.admin_notes?`<div style="font-size:8px;color:var(--gold);margin-top:3px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.admin_notes)}">📝 ${esc(d.admin_notes)}</div>`:''}</td>
+</tr>`).join('');
+  }
+  function enqRows(){
+    if(!enqs)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
+    if(!enqs.length)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No enquiries yet</td></tr>`;
+    return enqs.map((e,i)=>`<tr>
+<td style="font-size:10px;color:#fff;font-weight:600">${esc(e.name||'—')}</td>
+<td style="font-size:9px;color:var(--t3)">${esc(e.email||'—')}</td>
+<td style="font-size:9px;color:var(--t4)">${esc(e.company||'—')}</td>
+<td style="font-size:9px;color:var(--gold)">${esc(e.budget_range||'—')}</td>
+<td style="font-size:9px;color:var(--t3)">${esc(e.timeline||'—')}</td>
+<td style="font-size:9px;color:var(--t4);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.message||'')}">${esc((e.message||'—').substring(0,80)+(e.message?.length>80?'…':''))}</td>
+<td>${statusBadge(e.status||'pending')}</td>
+<td><div style="display:flex;gap:3px;flex-wrap:wrap">
+<button class="btn btn-ghost btn-sm" style="font-size:8px" onclick="leadsSetStatus('enq',${i},'contacted')">Contacted</button>
+<button class="btn btn-ghost btn-sm" style="font-size:8px;color:var(--green)" onclick="leadsSetStatus('enq',${i},'converted')">Converted</button>
+<button class="btn btn-ghost btn-sm" style="font-size:8px;color:var(--t4)" onclick="leadsAddNote('enq',${i})">Note</button>
+</div>${e.admin_notes?`<div style="font-size:8px;color:var(--gold);margin-top:3px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.admin_notes)}">📝 ${esc(e.admin_notes)}</div>`:''}</td>
+</tr>`).join('');
+  }
+  return`<div class="page">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+<div><div class="page-title">Leads</div><div class="page-sub">Demo bookings and enquiries from the website</div></div>
+<button class="btn btn-outline btn-sm" onclick="leadsRefresh()" ${loading?'disabled':''}>↓ ${loading?'Loading…':'Refresh'}</button>
+</div>
+<div style="display:flex;gap:6px;margin-bottom:14px">
+<button onclick="S.leadsTab='demo';render()" style="padding:5px 14px;border-radius:5px;border:1px solid ${ltab==='demo'?'var(--gold)':'var(--b2)'};background:${ltab==='demo'?'var(--bg2)':'var(--bg3)'};color:${ltab==='demo'?'var(--gold)':'var(--t4)'};cursor:pointer;font-size:10px;font-weight:${ltab==='demo'?'700':'400'}">Demo Requests ${demos?`(${demos.length})`:''}  </button>
+<button onclick="S.leadsTab='enq';render()" style="padding:5px 14px;border-radius:5px;border:1px solid ${ltab==='enq'?'var(--gold)':'var(--b2)'};background:${ltab==='enq'?'var(--bg2)':'var(--bg3)'};color:${ltab==='enq'?'var(--gold)':'var(--t4)'};cursor:pointer;font-size:10px;font-weight:${ltab==='enq'?'700':'400'}">Enquiries ${enqs?`(${enqs.length})`:''}  </button>
+</div>
+${ltab==='demo'?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:auto">
+<table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Role</th><th>Project Types</th><th>Demo Time</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>${demoRows()}</tbody></table></div>`
+:`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:auto">
+<table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Budget</th><th>Timeline</th><th>Message</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>${enqRows()}</tbody></table></div>`}
+</div>`;
+}
+async function leadsRefresh(){
+  if(!SB.ready()){toast('Configure Supabase first','err');return;}
+  S.leadsLoading=true;render();
+  try{
+    const [dr,eq]=await Promise.all([
+      fetch(SB._url+'/rest/v1/studio_demo_requests?order=created_at.desc&limit=200',{headers:SB._rh()}).then(r=>r.json()),
+      fetch(SB._url+'/rest/v1/studio_enquiries?order=created_at.desc&limit=200',{headers:SB._rh()}).then(r=>r.json())
+    ]);
+    S.leadsData={demos:Array.isArray(dr)?dr:[],enquiries:Array.isArray(eq)?eq:[]};
+    toast('Leads loaded','ok');
+  }catch(e){toast('Load failed: '+e.message,'err');}
+  S.leadsLoading=false;render();
+}
+async function leadsSetStatus(type,idx,status){
+  if(!SB.ready()){toast('Configure Supabase first','err');return;}
+  const key=type==='demo'?'demos':'enquiries';
+  const table=type==='demo'?'studio_demo_requests':'studio_enquiries';
+  const row=(S.leadsData?.[key]||[])[idx];
+  if(!row)return;
+  row.status=status;
+  render();
+  try{
+    await fetch(SB._url+'/rest/v1/'+table+'?id=eq.'+row.id,{method:'PATCH',headers:SB._wh(),body:JSON.stringify({status})});
+    toast('Status updated','ok');
+  }catch(e){toast('Update failed','err');}
+}
+async function leadsAddNote(type,idx){
+  const key=type==='demo'?'demos':'enquiries';
+  const table=type==='demo'?'studio_demo_requests':'studio_enquiries';
+  const row=(S.leadsData?.[key]||[])[idx];if(!row)return;
+  const note=prompt('Add note for '+row.name+':',row.admin_notes||'');
+  if(note===null)return;
+  row.admin_notes=note;render();
+  if(!SB.ready())return;
+  try{
+    await fetch(SB._url+'/rest/v1/'+table+'?id=eq.'+row.id,{method:'PATCH',headers:SB._wh(),body:JSON.stringify({admin_notes:note})});
+    toast('Note saved','ok');
+  }catch(e){toast('Note save failed','err');}
+}
+
 function saveSheetUrl(){const u=DB.getUser(S.session?.userId);if(!u)return;u.sheetsUrl=document.getElementById('sheets-url')?.value.trim()||'';DB.saveUser(u);}
 function saveAdminAccount(){const u=DB.getUser(S.session?.userId);if(!u)return;const n=document.getElementById('admin-name')?.value.trim();const p=document.getElementById('admin-pw')?.value.trim();if(n)u.name=n;if(p)u.password=p;DB.saveUser(u);S.session.name=u.name;DB.setSession(S.session);render();toast('Account saved!','ok');}
 
@@ -4113,7 +4215,7 @@ function doAddRef(){
 }
 function importClientAssets(){const p=DB.getProject(S.pid);if(!p||!p.clientId)return;const assets=DB.getUser(p.clientId)?.brandAssets?.filter(a=>a.preview)||[];if(!p.refs)p.refs=[];assets.forEach(a=>{if(!p.refs.find(r=>r.label===a.name))p.refs.push({label:a.name,type:'client_asset',prompt:a.name,img:a.preview,status:'done'});});DB.saveProject(p);render();toast(`${assets.length} client assets imported!`,'ok');}
 async function genAllRefs(){const p=DB.getProject(S.pid);if(!p)return;if(!kF()){toast('Enter fal.ai key','err');return}if(!p.refs?.length){rebuildRefs(p);}document.getElementById('btn-gen-refs').disabled=true;S.stopSb=false;for(let i=0;i<p.refs.length;i++){if(S.stopSb)break;await doRef(p,i);}document.getElementById('btn-gen-refs').disabled=false;toast('References done!','ok');}
-async function doRef(p,i){p.refs[i].status='gen';setRst(i,'gen','generating...');document.getElementById(`ri-${i}`).innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div>';try{const url=await falImg(applyRAGToPrompt(p.refs[i].prompt,p.id));const pUrl=await persistImage(url);p.refs[i].img=pUrl;p.refs[i].status='done';document.getElementById(`ri-${i}`).innerHTML=`<img src="${url}" onclick="openImgModal('${esc(p.refs[i].label||'')}','${url}')" style="width:100%;height:100%;object-fit:cover"/>`;setRst(i,'done','done');DB.saveProject(p);}catch(e){p.refs[i].status='error';setRst(i,'error','error');}}
+async function doRef(p,i){p.refs[i].status='gen';setRst(i,'gen','generating...');document.getElementById(`ri-${i}`).innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div>';try{const url=await falImg(applyRAGToPrompt(p.refs[i].prompt,p.id));const pUrl=await persistImage(url);p.refs[i].img=pUrl;p.refs[i].status='done';document.getElementById(`ri-${i}`).innerHTML=`<img src="${url}" onclick="openImgModal('${esc(p.refs[i].label||'')}','${url}')" style="width:100%;height:100%;object-fit:cover"/>`;setRst(i,'done','done');DB.saveProject(p);}catch(e){p.refs[i].status='error';setRst(i,'error',e.message||'error');toast('Image failed: '+( e.message||'unknown error'),'err');}}
 function setRst(i,st,txt){const el=document.getElementById(`rst-${i}`);if(el){el.style.background=st==='done'?'#041004':st==='gen'?'#1a0f00':'var(--bg4)';el.style.color=st==='done'?'var(--green)':st==='gen'?'var(--gold)':st==='error'?'var(--red)':'var(--t4)';el.textContent=txt;}}
 
 // ── STAGE 2, STEP 2: MULTI-ANGLE ──
@@ -4410,7 +4512,7 @@ async function runSbShot(p,shot){
     setSbImg(shot.num,finalPUrl);
     S.sbState[shot.num]={img:finalPUrl,status:'done'};setSbSt(shot.num,'done','done');
     p.sbState=S.sbState;DB.saveProject(p);
-  }catch(e){S.sbState[shot.num]={status:'error',img:null};setSbSt(shot.num,'error','err');}
+  }catch(e){S.sbState[shot.num]={status:'error',img:null};setSbSt(shot.num,'error',e.message||'err');console.error('runSbShot',shot.num,e);}
   const done=Object.values(S.sbState).filter(x=>x.status==='done').length;const tot=(p.shots||[]).length;const pct=tot?Math.round(done/tot*100):0;const pf=document.getElementById('sb-pf');const pt=document.getElementById('sb-pt');const pp=document.getElementById('sb-pct');if(pf)pf.style.width=pct+'%';if(pt)pt.textContent=done+'/'+tot;if(pp)pp.textContent=pct+'%';document.getElementById('st-i').textContent=done+' images';
 }
 function setSbSt(num,cls,txt){const b=document.getElementById('sbb-'+num);if(b){b.className='sbst sbst-'+cls;b.textContent=txt;}}
@@ -4916,8 +5018,8 @@ async function falImg(prompt){
   let body={prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
   if(activeLoras.length){
     model='fal-ai/flux-lora';
-    body.loras=activeLoras.map(e=>({path:e.lora_model_id,scale:0.85}));
-    body.model_name='dev';
+    const sizeMap={'21:9':'landscape_16_9','16:9':'landscape_16_9','4:3':'landscape_4_3','1:1':'square_hd','9:16':'portrait_16_9','3:4':'portrait_4_3'};
+    body={prompt,image_size:sizeMap[rat]||'landscape_16_9',output_format:'jpeg',loras:activeLoras.map(e=>({path:e.lora_model_id,scale:0.85})),model_name:'dev'};
   }
   const r=await fetch(`https://queue.fal.run/${model}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
