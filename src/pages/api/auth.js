@@ -66,8 +66,9 @@ function getSB() {
 }
 
 async function findUser(sb, identifier) {
-  // Search by email, clientId, username, or name
-  const r = await fetch(`${sb.url}/rest/v1/studio_users?select=id,data&limit=50`, { headers: sb.headers });
+  // Search by email, clientId, username, or name (use read-only headers)
+  const readHeaders = { 'apikey': sb.headers.apikey, 'Authorization': sb.headers.Authorization, 'Accept': 'application/json' };
+  const r = await fetch(`${sb.url}/rest/v1/studio_users?select=id,data&limit=50`, { headers: readHeaders });
   if (!r.ok) return null;
   const rows = await r.json();
   const id = identifier.toLowerCase();
@@ -101,23 +102,27 @@ async function logAudit(sb, event) {
 }
 
 export async function POST({ request }) {
-  const { action, ...params } = await request.json();
-  const sb = getSB();
+  try {
+    const { action, ...params } = await request.json();
+    const sb = getSB();
 
-  if (action === 'login') {
-    return handleLogin(params, sb, request);
-  }
-  if (action === 'verify') {
-    return handleVerify(params);
-  }
-  if (action === 'hash') {
-    return handleHash(params);
-  }
-  if (action === 'change-password') {
-    return handleChangePassword(params, sb);
-  }
+    if (action === 'login') {
+      return await handleLogin(params, sb, request);
+    }
+    if (action === 'verify') {
+      return await handleVerify(params);
+    }
+    if (action === 'hash') {
+      return await handleHash(params);
+    }
+    if (action === 'change-password') {
+      return await handleChangePassword(params, sb);
+    }
 
-  return json({ error: 'Unknown action' }, 400);
+    return json({ error: 'Unknown action' }, 400);
+  } catch (e) {
+    return json({ error: 'Auth error: ' + e.message }, 500);
+  }
 }
 
 async function handleLogin({ identifier, password }, sb, request) {
