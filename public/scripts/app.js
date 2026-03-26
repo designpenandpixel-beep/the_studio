@@ -643,7 +643,7 @@ function loginHTML(){
 <div class="login-hero">
   <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
   <div class="login-hero-content">
-    <div class="login-hero-logo">Cinex<span>AI</span></div>
+    <div class="login-hero-logo"><img src="/Logo.svg" alt="CinexAI" style="height:56px;width:auto"></div>
     <div class="login-hero-tagline">AI-powered media production.<br>From brief to final cut.</div>
     <div class="login-hero-features">
       <div class="login-hero-feature"><div class="login-hero-feature-icon orange">◈</div>Produce</div>
@@ -653,7 +653,7 @@ function loginHTML(){
   </div>
 </div>
 <div class="login-form-panel"><div class="login-box">
-<div class="login-logo">Cinex<span>AI</span></div>
+<div class="login-logo"><img src="/Logo.svg" alt="CinexAI" style="height:44px;width:auto"></div>
 <div class="login-sub">Sign in to your production workspace</div>
 <div class="login-err" id="lerr"></div>
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
@@ -776,7 +776,7 @@ function appBarHTML(){
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
   const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
   return`<div class="app-bar">
-<div class="logo">Cinex<span>AI</span></div>
+<div class="logo"><img src="/Logo.svg" alt="CinexAI" style="height:34px;width:auto"></div>
 <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
 <span class="rb-${r}">${roleLabel}</span>
 <span class="app-bar-name">${S.session?.name}</span>
