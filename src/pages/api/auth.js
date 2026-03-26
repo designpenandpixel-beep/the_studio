@@ -54,21 +54,18 @@ function getSB() {
   const url = import.meta.env.SUPABASE_URL || '';
   const serviceKey = import.meta.env.SUPABASE_SERVICE_KEY || '';
   if (!url || !serviceKey) return null;
+  const base = { 'apikey': serviceKey, 'Authorization': 'Bearer ' + serviceKey };
   return {
     url: url.replace(/\/+$/, ''),
-    headers: {
-      'apikey': serviceKey,
-      'Authorization': `Bearer ${serviceKey}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'resolution=merge-duplicates,return=representation',
-    },
+    readHeaders: { ...base, 'Accept': 'application/json' },
+    writeHeaders: { ...base, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    headers: { ...base, 'Content-Type': 'application/json' },
   };
 }
 
 async function findUser(sb, identifier) {
   // Search by email, clientId, username, or name (use read-only headers)
-  const readHeaders = { 'apikey': sb.headers.apikey, 'Authorization': sb.headers.Authorization, 'Accept': 'application/json' };
-  const r = await fetch(`${sb.url}/rest/v1/studio_users?select=id,data&limit=50`, { headers: readHeaders });
+  const r = await fetch(`${sb.url}/rest/v1/studio_users?select=id,data&limit=50`, { headers: sb.readHeaders });
   if (!r.ok) return null;
   const rows = await r.json();
   const id = identifier.toLowerCase();
@@ -86,7 +83,7 @@ async function findUser(sb, identifier) {
 async function updateUser(sb, id, data) {
   await fetch(`${sb.url}/rest/v1/studio_users?id=eq.${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    headers: sb.headers,
+    headers: sb.writeHeaders,
     body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
   });
 }
@@ -95,7 +92,7 @@ async function logAudit(sb, event) {
   try {
     await fetch(`${sb.url}/rest/v1/studio_audit_log`, {
       method: 'POST',
-      headers: { ...sb.headers, 'Prefer': 'return=minimal' },
+      headers: sb.writeHeaders,
       body: JSON.stringify(event),
     });
   } catch { /* audit logging should never block */ }
@@ -213,7 +210,7 @@ async function handleChangePassword({ token, newPassword }, sb) {
   if (!sb) return json({ error: 'Server auth not configured' }, 500);
 
   // Find user and update password
-  const r = await fetch(`${sb.url}/rest/v1/studio_users?id=eq.${encodeURIComponent(payload.userId)}&select=id,data`, { headers: sb.headers });
+  const r = await fetch(`${sb.url}/rest/v1/studio_users?id=eq.${encodeURIComponent(payload.userId)}&select=id,data`, { headers: sb.readHeaders });
   const rows = await r.json();
   if (!rows?.length) return json({ error: 'User not found' }, 404);
 
