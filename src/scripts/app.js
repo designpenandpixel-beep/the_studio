@@ -151,7 +151,7 @@ _loadLS();
 // ── Supabase REST layer ──
 const SB={
   _url:'',_key:'',_status:'unconfigured', // unconfigured | ok | error | syncing
-  _queue:[],_flushing:false,
+  _queue:[],_flushing:false,_retries:0,_maxRetries:3,_dirty:new Set(), // _dirty tracks IDs with local unsaved changes
   init(){
     this._url=localStorage.getItem('sb_url')||'';
     this._key=localStorage.getItem('sb_key')||'';
@@ -202,40 +202,67 @@ const SB={
       if(!r.ok)throw new Error(r.status);
     }catch(e){this._status='error';this._updateDot();console.warn('SB delete',table,id,e.message);}
   },
-  // Enqueue write (fire-and-forget, non-blocking)
+  // Enqueue write — queues even when not ready (will flush when connected)
   push(table,id,data){
-    if(!this.ready())return;
+    this._dirty.add(table+':'+id);
     this._queue.push({table,id,data});
-    this._flush();
+    if(this.ready())this._flush();
   },
-  del(table,id){if(!this.ready())return;this._queue.push({table,id,_delete:true});this._flush();},
+  del(table,id){this._dirty.delete(table+':'+id);this._queue.push({table,id,_delete:true});if(this.ready())this._flush();},
   async _flush(){
-    if(this._flushing||!this._queue.length)return;
+    if(this._flushing||!this._queue.length||!this.ready())return;
     this._flushing=true;this._status='syncing';this._updateDot();
+    const failed=[];
     while(this._queue.length){
       const op=this._queue.shift();
-      if(op._delete)await this._delete(op.table,op.id);
-      else if(op._ld)await this._upsertLD(op.entry);
-      else if(op._delLD)await this._delLD(op.id);
-      else await this._upsert(op.table,op.id,op.data);
+      let ok=false;
+      for(let attempt=0;attempt<this._maxRetries;attempt++){
+        try{
+          if(op._delete)await this._delete(op.table,op.id);
+          else if(op._ld)await this._upsertLD(op.entry);
+          else if(op._delLD)await this._delLD(op.id);
+          else await this._upsert(op.table,op.id,op.data);
+          ok=true;
+          this._dirty.delete((op.table||'ld')+':'+(op.id||op.entry?.id));
+          break;
+        }catch(e){
+          console.warn('SB flush retry',attempt+1,'/',this._maxRetries,e.message);
+          if(attempt<this._maxRetries-1)await new Promise(r=>setTimeout(r,1000*(attempt+1))); // backoff: 1s, 2s, 3s
+        }
+      }
+      if(!ok){failed.push(op);console.warn('SB flush failed permanently:',op.table,op.id);}
     }
-    this._flushing=false;if(this._status==='syncing'){this._status='ok';this._updateDot();}
+    if(failed.length){this._queue.unshift(...failed);this._status='error';}
+    else if(this._status==='syncing'){this._status='ok';}
+    this._flushing=false;this._updateDot();
   },
-  // Pull all data from Supabase and merge into memory
+  // Merge-aware pull — preserves locally dirty data instead of overwriting
+  _mergeArray(local,remote,table){
+    if(!remote||!remote.length)return local;
+    const dirtyIds=new Set([...this._dirty].filter(k=>k.startsWith(table+':')).map(k=>k.split(':')[1]));
+    const merged=new Map();
+    // Start with remote as base
+    remote.forEach(item=>merged.set(item.id,item));
+    // Overlay local dirty items (they haven't synced yet — keep local version)
+    local.forEach(item=>{
+      if(dirtyIds.has(item.id))merged.set(item.id,item);
+    });
+    return Array.from(merged.values());
+  },
   async pullAll(){
     if(!this.ready())return false;
     if(this._status==='saved')return false; // Don't pull until connection verified
+    if(this._flushing)return false; // Don't pull while flushing — avoid race
     this._status='syncing';this._updateDot();
     try{
       const [users,projects,notifs,intgs]=await Promise.all([
         this._get('studio_users'),this._get('studio_projects'),
         this._get('studio_notifications'),this._get('studio_integrations')
       ]);
-      let gotAny=false;
-      if(users&&users.length){_users=users;_tryLS(()=>localStorage.setItem('sv2_users',JSON.stringify(_users)));gotAny=true;}
-      if(projects){_projects=projects;_tryLS(()=>localStorage.setItem('sv2_projects',JSON.stringify(_projects)));gotAny=true;}
-      if(notifs){_notifs=notifs;_tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));}
-      if(intgs){_integrations=intgs;_tryLS(()=>localStorage.setItem('sv2_integrations',JSON.stringify(_integrations)));}
+      if(users&&users.length){_users=this._mergeArray(_users,users,'studio_users');_tryLS(()=>localStorage.setItem('sv2_users',JSON.stringify(_users)));}
+      if(projects){_projects=this._mergeArray(_projects,projects,'studio_projects');_tryLS(()=>localStorage.setItem('sv2_projects',JSON.stringify(_projects)));}
+      if(notifs){_notifs=this._mergeArray(_notifs,notifs,'studio_notifications');_tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));}
+      if(intgs){_integrations=this._mergeArray(_integrations,intgs,'studio_integrations');_tryLS(()=>localStorage.setItem('sv2_integrations',JSON.stringify(_integrations)));}
       const ld=await this._getLD();
       if(ld&&ld.length){_ldEntries=ld;_tryLS(()=>localStorage.setItem('sv2_ld',JSON.stringify(_ldEntries)));}
       this._status='ok';this._updateDot();
@@ -2299,7 +2326,7 @@ async function ldRefImagesSelected(input){
 
 // Upload file to fal.ai storage and return CDN URL
 async function uploadFileToFal(file){
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  const k=kF(); // may be empty — server proxy has FAL_KEY
   // Step 1: get upload URL from fal.ai
   const initResp=await falFetch('https://rest.fal.run/storage/upload/initiate',{
     method:'POST',
@@ -2352,9 +2379,10 @@ async function extractLDStyle(id){
   }
   if(url){
     try{
+      const _ck=kC();const _ch={'Content-Type':'application/json','anthropic-version':'2023-06-01'};if(_ck)_ch['x-api-key']=_ck;
       const resp=await fetch('/api/claude',{
         method:'POST',
-        headers:{'x-api-key':kC(),'anthropic-version':'2023-06-01','Content-Type':'application/json'},
+        headers:_ch,
         body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:'Fetch and summarise this URL content for visual style extraction: '+url+'. If you cannot access it, describe the expected content style based on the URL.'}]})
       });
       const d=await resp.json();
@@ -5416,17 +5444,21 @@ function saveInputs(){
 // API — CLAUDE
 // ══════════════════════════════════════
 async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
-  const k=kC();if(!k)throw new Error('No Anthropic key. Enter it in the top bar.');
+  const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
   const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
+  const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
   // Route through Supabase edge function to avoid CORS (Anthropic API blocks direct browser requests)
   const sbUrl=(SB._url||localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
   const sbKey=SB._key||localStorage.getItem('sb_key')||'';
   const proxyUrl=sbUrl?sbUrl+'/functions/v1/claude-proxy':'';
   let r;
   if(proxyUrl&&sbKey){
-    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
+    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
   }else{
-    r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
+    // Server route — sends client key as header; server prefers its own CLAUDE_API_KEY env var
+    const headers={'Content-Type':'application/json','anthropic-version':'2023-06-01'};
+    if(k)headers['x-api-key']=k; // only send if we have one — server may have its own
+    r=await fetch('/api/claude',{method:'POST',headers,body:payload});
   }
   const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
 }
@@ -5434,9 +5466,9 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization'];const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,authorization})});}
+function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
 async function falImg(prompt){
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   if(S.stopSb)throw new Error('Stopped');
   const rat=S.imgAspect||document.getElementById('s-rat')?.value||'16:9';
   // Apply tone/quality to prompt if set
@@ -5463,7 +5495,7 @@ async function falImg(prompt){
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
   if(S.stopSb)throw new Error('Stopped');
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   const rat=document.getElementById('s-rat')?.value||'1:1';
   const model='fal-ai/flux-pro/kontext';
   const body={image_url:imgUrl,prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
@@ -5474,7 +5506,7 @@ async function falImgI2I(imgUrl,prompt,strength){
   for(let i=0;i<120;i++){await sleep(2200);const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
 }
 async function falVid(imgUrl,prompt,dur,ratio){
-  const k=kF();if(!k)throw new Error('No fal.ai key');if(!S.vidModel)throw new Error('No model');
+  const k=kF();if(!S.vidModel)throw new Error('No model'); // k may be empty — server proxy has FAL_KEY
   const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur),aspect_ratio:ratio})});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
