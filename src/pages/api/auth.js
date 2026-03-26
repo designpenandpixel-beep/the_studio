@@ -100,19 +100,8 @@ async function logAudit(sb, event) {
 
 export async function POST({ request }) {
   try {
-    const body = await request.text();
-    let parsed;
-    try { parsed = JSON.parse(body); } catch { return json({ error: 'Invalid JSON' }, 400); }
-    const { action, ...params } = parsed;
+    const { action, ...params } = await request.json();
     const sb = getSB();
-    // Debug: check for non-ASCII chars in headers
-    if (sb) {
-      for (const [k, v] of Object.entries(sb.readHeaders)) {
-        for (let i = 0; i < v.length; i++) {
-          if (v.charCodeAt(i) > 255) return json({ error: `Non-ASCII in header '${k}' at index ${i}: char ${v.charCodeAt(i)} (${v.charAt(i)}). Value prefix: ${v.substring(0, 30)}` }, 500);
-        }
-      }
-    }
 
     if (action === 'login') {
       return await handleLogin(params, sb, request);
