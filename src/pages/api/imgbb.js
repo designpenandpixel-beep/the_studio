@@ -1,6 +1,17 @@
 export const prerender = false;
+import { getSession } from '../../lib/auth.js';
 
 export async function POST({ request }) {
+  // Session validation
+  if (import.meta.env.SESSION_SECRET) {
+    const session = await getSession(request);
+    if (!session) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   const IMGBB_KEY = import.meta.env.IMGBB_KEY;
   if (!IMGBB_KEY) {
     return new Response(JSON.stringify({ error: 'IMGBB_KEY not configured' }), {

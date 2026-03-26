@@ -1,4 +1,5 @@
 export const prerender = false
+import { getSession } from '../../lib/auth.js';
 
 // Allowed fal.ai domains — prevents SSRF attacks
 const ALLOWED_HOSTS = [
@@ -25,6 +26,16 @@ function isAllowedUrl(urlStr) {
 }
 
 export async function POST({ request }) {
+    // Session validation (soft check — only enforced if SESSION_SECRET is set)
+    if (import.meta.env.SESSION_SECRET) {
+      const session = await getSession(request);
+      if (!session) {
+        return new Response(JSON.stringify({ error: 'Authentication required' }), {
+          status: 401, headers: { 'Content-Type': 'application/json' }
+        })
+      }
+    }
+
     const { url, method = 'POST', body, authorization } = await request.json()
 
     if (!url) {

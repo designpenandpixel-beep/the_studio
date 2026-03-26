@@ -1,4 +1,5 @@
 export const prerender = false;
+import { getSession } from '../../lib/auth.js';
 
 // Restrict CORS to same-origin in production, allow localhost in dev
 function getCorsOrigin(request) {
@@ -15,7 +16,7 @@ function corsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': getCorsOrigin(request),
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version',
+    'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version, x-session-token, Authorization',
     'Vary': 'Origin',
   };
 }
@@ -29,6 +30,17 @@ const MAX_BODY_SIZE = 256 * 1024;
 
 export const POST = async ({ request }) => {
   const headers = corsHeaders(request);
+
+  // Verify session token if SESSION_SECRET is configured (soft check — doesn't block if auth not set up)
+  const sessionSecret = import.meta.env.SESSION_SECRET;
+  if (sessionSecret) {
+    const session = await getSession(request);
+    if (!session) {
+      return new Response(JSON.stringify({ error: 'Authentication required. Please sign in again.' }), {
+        status: 401, headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+  }
 
   // Prefer server-side key from env, fall back to client-provided
   const serverKey = import.meta.env.CLAUDE_API_KEY || import.meta.env.ANTHROPIC_API_KEY;

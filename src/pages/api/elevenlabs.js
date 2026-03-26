@@ -1,4 +1,5 @@
 export const prerender = false;
+import { getSession } from '../../lib/auth.js';
 
 const ALLOWED_PATHS = [
   '/v1/text-to-speech/',
@@ -6,6 +7,16 @@ const ALLOWED_PATHS = [
 ];
 
 export async function POST({ request }) {
+  // Session validation
+  if (import.meta.env.SESSION_SECRET) {
+    const session = await getSession(request);
+    if (!session) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   const elKey = import.meta.env.ELEVENLABS_KEY;
   const { path, body, clientKey } = await request.json();
 

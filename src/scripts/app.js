@@ -374,6 +374,7 @@ const SB={
   async initTables(){
     if(!this.ready())return{ok:false,msg:'Configure URL and key first'};
     const sql=`
+-- Core tables
 CREATE TABLE IF NOT EXISTS studio_users (
   id text PRIMARY KEY,
   data jsonb NOT NULL,
@@ -395,13 +396,47 @@ CREATE TABLE IF NOT EXISTS studio_integrations (
   data jsonb NOT NULL,
   updated_at timestamptz DEFAULT now()
 );
+
+-- Audit log table
+CREATE TABLE IF NOT EXISTS studio_audit_log (
+  id bigserial PRIMARY KEY,
+  event_type text NOT NULL,
+  user_id text,
+  user_role text,
+  target_id text,
+  detail text,
+  ip text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON studio_notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_updated ON studio_projects(updated_at DESC);
-ALTER TABLE studio_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_projects DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_notifications DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_integrations DISABLE ROW LEVEL SECURITY;
-GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integrations TO anon, authenticated;`.trim();
+CREATE INDEX IF NOT EXISTS idx_audit_created ON studio_audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON studio_audit_log(user_id);
+
+-- Enable Row-Level Security
+ALTER TABLE studio_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_integrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_audit_log ENABLE ROW LEVEL SECURITY;
+
+-- Anon role: read-only access (writes go through authenticated server endpoints)
+CREATE POLICY IF NOT EXISTS "anon_read_users" ON studio_users FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_projects" ON studio_projects FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_notifs" ON studio_notifications FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_integrations" ON studio_integrations FOR SELECT TO anon USING (true);
+
+-- Authenticated role: full access (server-side operations use service_role key)
+GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integrations, studio_audit_log TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE studio_audit_log_id_seq TO authenticated;
+
+-- Anon can read but NOT write (except audit log for logging)
+GRANT SELECT ON studio_users, studio_projects, studio_notifications, studio_integrations TO anon;
+GRANT INSERT ON studio_audit_log TO anon;
+CREATE POLICY IF NOT EXISTS "anon_insert_audit" ON studio_audit_log FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY IF NOT EXISTS "auth_all_audit" ON studio_audit_log FOR ALL TO authenticated USING (true);`.trim();
     try{
       const r=await fetch(this._url+'/rest/v1/rpc/exec_sql',{
         method:'POST',headers:{...this.headers(),'Content-Type':'application/json'},
@@ -415,6 +450,19 @@ GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integra
 
 // ══════════════════════════════════════
 // PERSISTENT IMAGE STORAGE — imgbb.com
+// Audit logging — fire-and-forget to server
+function auditLog(event_type,detail,target_id){
+  try{fetch('/api/log',{method:'POST',headers:_authHeaders(),body:JSON.stringify({event_type,detail,target_id})}).catch(()=>{});}catch(e){}
+}
+
+// Session token header helper — include in all API calls for server-side auth
+function _authHeaders(extra){
+  const h={'Content-Type':'application/json',...(extra||{})};
+  const tk=_sessionToken||localStorage.getItem('sv2_token')||'';
+  if(tk)h['x-session-token']=tk;
+  return h;
+}
+
 // Persistent image storage via server-side proxy (API key kept server-side)
 // ══════════════════════════════════════
 async function persistImage(url){
@@ -423,7 +471,7 @@ async function persistImage(url){
   try{
     const r=await fetch('/api/imgbb',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:_authHeaders(),
       body:JSON.stringify({image:url})
     });
     if(!r.ok)return url;
@@ -618,45 +666,89 @@ function loginHTML(){
 
 // Brute force protection
 let _loginAttempts=0,_loginLockUntil=0;
-function doLogin(){
+let _sessionToken=null; // Server-signed session token
+function _showLoginErr(msg){const el=document.getElementById('lerr');if(el){el.style.display='block';el.textContent=msg;}}
+
+async function doLogin(){
   const now=Date.now();
-  if(now<_loginLockUntil){const secs=Math.ceil((_loginLockUntil-now)/1000);const el=document.getElementById('lerr');el.style.display='block';el.textContent=`Too many attempts. Try again in ${secs}s.`;return;}
+  if(now<_loginLockUntil){_showLoginErr(`Too many attempts. Try again in ${Math.ceil((_loginLockUntil-now)/1000)}s.`);return;}
   const id=document.getElementById('lid').value.trim();
   const pw=document.getElementById('lpw').value.trim();
-  if(!id||!pw){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Enter both username and password.';return;}
-  const u=DB.getUsers().find(u=>u.active!==false&&u.password===pw&&(u.email===id||u.clientId===id||u.username===id||u.name.toLowerCase()===id.toLowerCase()));
-  if(!u){
+  if(!id||!pw){_showLoginErr('Enter both username and password.');return;}
+
+  // Try server-side auth first (PBKDF2 hashed, signed session)
+  try{
+    const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',identifier:id,password:pw})});
+    const d=await r.json();
+    if(d.ok&&d.token){
+      // Server auth succeeded
+      _loginAttempts=0;_loginLockUntil=0;
+      _sessionToken=d.token;
+      _tryLS(()=>localStorage.setItem('sv2_token',d.token));
+      S.session={userId:d.user.id,role:d.user.role,name:d.user.name};DB.setSession(S.session);
+      S.view=d.user.role;S.tab='dashboard';
+      if(d.forcePasswordChange){
+        render();showForceChangePwModal();return;
+      }
+      render();toast('Welcome, '+d.user.name+'!','ok');return;
+    }
+    if(d.fallback){
+      // Server auth not configured — fall through to client-side
+    }else{
+      // Server auth rejected
+      _loginAttempts++;
+      if(_loginAttempts>=10){_loginLockUntil=now+300000;_showLoginErr('Account locked for 5 minutes.');}
+      else if(_loginAttempts>=5){_loginLockUntil=now+30000;_showLoginErr('Too many attempts. Locked for 30 seconds.');}
+      else{_showLoginErr('Invalid credentials. ('+_loginAttempts+'/5)');}
+      return;
+    }
+  }catch(e){/* Server auth unavailable — fall through to client-side */}
+
+  // Fallback: client-side auth (for local development or when server auth not configured)
+  const u=DB.getUsers().find(u=>u.active!==false&&(u.password===pw||(u.passwordHash&&u.passwordSalt))&&(u.email===id||u.clientId===id||u.username===id||u.name.toLowerCase()===id.toLowerCase()));
+  if(!u||u.password!==pw){
     _loginAttempts++;
-    const el=document.getElementById('lerr');el.style.display='block';
-    if(_loginAttempts>=10){_loginLockUntil=now+300000;el.textContent='Account locked for 5 minutes. Too many failed attempts.';}
-    else if(_loginAttempts>=5){_loginLockUntil=now+30000;el.textContent='Too many attempts. Locked for 30 seconds.';}
-    else{el.textContent='Invalid credentials. Please try again. ('+_loginAttempts+'/5)';}
+    if(_loginAttempts>=10){_loginLockUntil=now+300000;_showLoginErr('Account locked for 5 minutes.');}
+    else if(_loginAttempts>=5){_loginLockUntil=now+30000;_showLoginErr('Too many attempts. Locked for 30 seconds.');}
+    else{_showLoginErr('Invalid credentials. ('+_loginAttempts+'/5)');}
     return;
   }
-  // Check if inactive
-  if(u.active===false){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Account is suspended. Contact your admin.';return;}
+  if(u.active===false){_showLoginErr('Account is suspended. Contact your admin.');return;}
   _loginAttempts=0;_loginLockUntil=0;
   S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';
-  // Force password change if using default password
-  if(u.password==='admin123'&&u.role==='admin'){
-    render();
-    openModal(`<div class="modal-title">Change Default Password</div>
+  if(u.password==='admin123'&&u.role==='admin'){render();showForceChangePwModal();return;}
+  render();toast('Welcome, '+u.name+'!','ok');
+}
+
+function showForceChangePwModal(){
+  openModal(`<div class="modal-title">Change Default Password</div>
 <div class="ib ib-red"><strong>Security:</strong> You are using the default admin password. Please change it now.</div>
 <div class="fg"><label>New Password (min 8 characters)</label><input type="password" id="new-pw1" placeholder="Enter new password"/></div>
 <div class="fg"><label>Confirm Password</label><input type="password" id="new-pw2" placeholder="Confirm password"/></div>
 <div class="btn-row"><button class="btn btn-gold" onclick="forceChangePw()">Change Password</button></div>`);
-    return;
-  }
-  render();toast('Welcome, '+u.name+'!','ok');
 }
-function forceChangePw(){
+
+async function forceChangePw(){
   const p1=document.getElementById('new-pw1')?.value||'';const p2=document.getElementById('new-pw2')?.value||'';
   if(p1.length<8){toast('Password must be at least 8 characters','err');return;}
   if(p1!==p2){toast('Passwords do not match','err');return;}
+  // Try server-side password change
+  if(_sessionToken){
+    try{
+      const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'change-password',token:_sessionToken,newPassword:p1})});
+      const d=await r.json();if(d.ok){closeModal();toast('Password changed securely!','ok');return;}
+    }catch(e){}
+  }
+  // Fallback: client-side
   const u=DB.getUser(S.session?.userId);if(!u)return;
-  u.password=p1;DB.saveUser(u);closeModal();toast('Password changed! Welcome, '+u.name+'!','ok');
+  u.password=p1;DB.saveUser(u);closeModal();toast('Password changed!','ok');
 }
-function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashboard';S.pid=null;render()}
+
+function doLogout(){
+  auditLog('logout','User signed out');
+  _sessionToken=null;_tryLS(()=>localStorage.removeItem('sv2_token'));
+  DB.clearSession();S.session=null;S.view='login';S.tab='dashboard';S.pid=null;render();
+}
 
 // ══════════════════════════════════════
 // APP BAR
@@ -718,7 +810,7 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
 }
 
 function getKey(k){const u=DB.getUser(S.session?.userId);return u?.apiKeys?.[k]||''}
-function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:document.getElementById('k-c')?.value||'',fal:document.getElementById('k-f')?.value||'',el:document.getElementById('k-e')?.value||''};DB.saveUser(u);['c','f','e'].forEach((x,i)=>{const d=document.getElementById('kd'+x);const inp=document.getElementById('k-'+x);if(d)d.className='kdot'+(inp?.value?' ok':'');})}
+function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:document.getElementById('k-c')?.value||'',fal:document.getElementById('k-f')?.value||'',el:document.getElementById('k-e')?.value||''};auditLog('api_keys_updated','Admin updated API keys');DB.saveUser(u);['c','f','e'].forEach((x,i)=>{const d=document.getElementById('kd'+x);const inp=document.getElementById('k-'+x);if(d)d.className='kdot'+(inp?.value?' ok':'');})}
 // kC / kF / kE defined above near genProjectId
 function hasNotifs(){const uid=S.session?.userId;if(!uid)return false;return DB.getNotifs(uid).some(n=>!n.read);}
 function getUnreadCount(){const uid=S.session?.userId;if(!uid)return 0;return DB.getNotifs(uid).filter(n=>!n.read).length;}
@@ -904,7 +996,7 @@ function adminProjRow(p){
 <td><div style="display:flex;gap:4px">
 <button class="btn btn-ghost btn-sm" onclick="openStudio('${p.id}')">Open</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){DB.deleteProject('${p.id}');render()}">Del</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');render()}">Del</button>
 </div></td></tr>`;
 }
 
@@ -1153,7 +1245,7 @@ ${(p.comments||[]).length?`<div style="font-size:8px;color:var(--blue)">💬${p.
 <td onclick="event.stopPropagation()"><div style="display:flex;gap:3px">
 <button class="btn btn-ghost btn-sm" onclick="openStudio('${p.id}')">Open</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){DB.deleteProject('${p.id}');render()}">Del</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');render()}">Del</button>
 </div></td></tr>`;}).join('')}
 </tbody></table></div>`;
 }
@@ -1183,7 +1275,7 @@ ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH<
 <button class="btn btn-gold" onclick="openStudio('${p.id}')">Open Studio →</button>
 <button class="btn btn-outline btn-sm" onclick="showEditProjModal('${p.id}')">Edit</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
 </div></div>
 
 ${isOverdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(p.deadline)} days overdue.</strong> Deadline was ${new Date(p.deadline).toLocaleDateString()}.</div>`:''}
@@ -2416,7 +2508,7 @@ async function extractLDStyle(id){
   }
   if(url){
     try{
-      const _ck=kC();const _ch={'Content-Type':'application/json','anthropic-version':'2023-06-01'};if(_ck)_ch['x-api-key']=_ck;
+      const _ck=kC();const _ch=_authHeaders({'anthropic-version':'2023-06-01'});if(_ck)_ch['x-api-key']=_ck;
       const resp=await fetch('/api/claude',{
         method:'POST',
         headers:_ch,
@@ -3587,7 +3679,7 @@ ${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <st
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
-function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
+function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);auditLog('user_status_changed',u.active?'Activated':'Deactivated',uid);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
 
 function showAssignClientsModal(empId){
   const emp=DB.getUser(empId);if(!emp)return;
@@ -3697,7 +3789,7 @@ function openModal(html){document.getElementById('modal-root').innerHTML=`<div c
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
-function viewAsClient(cid){const og=S.session.userId;S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
+function viewAsClient(cid){const og=S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
 
 // ══════════════════════════════════════
 // STUDIO
@@ -5457,7 +5549,7 @@ async function elFetch(path,body){
   const k=kE(); // client key as fallback if server has no env var
   const r=await fetch('/api/elevenlabs',{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
+    headers:_authHeaders(),
     body:JSON.stringify({path,body,clientKey:k||undefined})
   });
   if(!r.ok){const d=await r.json().catch(()=>({error:'EL error '+r.status}));throw new Error(d.error||'EL '+r.status);}
@@ -5497,7 +5589,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
     r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
   }else{
     // Server route — sends client key as header; server prefers its own CLAUDE_API_KEY env var
-    const headers={'Content-Type':'application/json','anthropic-version':'2023-06-01'};
+    const headers=_authHeaders({'anthropic-version':'2023-06-01'});
     if(k)headers['x-api-key']=k; // only send if we have one — server may have its own
     r=await fetch('/api/claude',{method:'POST',headers,body:payload});
   }
@@ -5507,7 +5599,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
+function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
 async function falImg(prompt){
   const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   if(S.stopSb)throw new Error('Stopped');
