@@ -583,6 +583,154 @@ body::after {
 }
 
 /* ─────────────────────────────────────────
+   ADMIN IMPERSONATION BAR
+───────────────────────────────────────── */
+.admin-impersonation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 20px;
+  background: linear-gradient(90deg, rgba(255,107,53,0.12) 0%, rgba(139,92,246,0.10) 100%);
+  border-bottom: 1px solid rgba(255,107,53,0.25);
+  position: sticky;
+  top: 0;
+  z-index: 201;
+  gap: 12px;
+}
+.admin-imp-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--t2);
+}
+.admin-imp-left svg { color: var(--gold); flex-shrink: 0; }
+.admin-imp-left strong { color: #fff; }
+.btn-return-admin {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--grad-hero);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.btn-return-admin:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 16px rgba(255,107,53,0.35);
+}
+.btn-return-admin svg { flex-shrink: 0; }
+
+/* ─────────────────────────────────────────
+   NOTIFICATION PANEL ITEMS
+───────────────────────────────────────── */
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--b1);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.notif-item:hover { background: rgba(255,255,255,0.03); }
+.notif-unread { background: rgba(139,92,246,0.05); }
+.notif-read { background: transparent; opacity: 0.65; }
+.notif-dot-wrap { padding-top: 5px; flex-shrink: 0; }
+.notif-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--b3);
+  transition: background 0.2s;
+}
+.notif-dot.active {
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(255,107,53,0.4);
+}
+.notif-icon { font-size: 14px; flex-shrink: 0; line-height: 1; padding-top: 1px; }
+.notif-content { flex: 1; min-width: 0; }
+.notif-title { font-size: 10px; font-weight: 700; color: var(--t1); line-height: 1.3; }
+.notif-read .notif-title { color: var(--t3); }
+.notif-body { font-size: 9px; color: var(--t4); margin-top: 2px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-time { font-size: 8px; color: var(--t4); margin-top: 3px; }
+
+/* ─────────────────────────────────────────
+   DELIVERY SHOWCASE
+───────────────────────────────────────── */
+.delivery-showcase {
+  background: var(--bg2);
+  border: 1px solid var(--b1);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.delivery-showcase::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--grad-hero);
+}
+.delivery-hero { margin-bottom: 12px; }
+.delivery-hero video,
+.delivery-hero img { box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+.delivery-hero-actions { margin-top: 10px; display: flex; gap: 8px; }
+.delivery-extras { margin-top: 12px; }
+.badge-cyan { background: rgba(6,182,212,0.12); color: var(--cyan); border: 1px solid rgba(6,182,212,0.25); }
+.btn-cyan {
+  background: rgba(6,182,212,0.12);
+  color: var(--cyan);
+  border: 1px solid rgba(6,182,212,0.25);
+}
+.btn-cyan:hover {
+  background: rgba(6,182,212,0.2);
+  box-shadow: 0 0 12px rgba(6,182,212,0.25);
+}
+
+/* ─────────────────────────────────────────
+   STUDIO BRIEF AI HELP
+───────────────────────────────────────── */
+.btn-brief-ai-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  padding: 3px 9px;
+  font-size: 9px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--gold);
+  background: rgba(255,107,53,0.06);
+  border: 1px solid rgba(255,107,53,0.15);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-brief-ai-help:hover {
+  background: rgba(255,107,53,0.12);
+  border-color: rgba(255,107,53,0.3);
+  box-shadow: 0 0 8px rgba(255,107,53,0.15);
+}
+.btn-brief-ai-help:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.brief-ai-panel {
+  margin-top: 6px;
+  background: #0e0a18;
+  border: 1px solid rgba(255,107,53,0.18);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+
+/* ─────────────────────────────────────────
    APP BAR
 ───────────────────────────────────────── */
 .app-bar {

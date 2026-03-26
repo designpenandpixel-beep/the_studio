@@ -102,6 +102,16 @@ const IMG_MODELS=[
   {id:'fal-ai/ideogram/v2',n:'Ideogram V2',s:'Text in images, posters',tags:['text-rendering'],c:'~$0.05/img'},
   {id:'fal-ai/flux-pro/kontext',n:'FLUX Kontext',s:'Image-to-image, consistency',tags:['img2img','consistency'],c:'~$0.05/img'}
 ];
+// ── ComfyUI Workflow Library (V2 — architecture ready) ──
+const WORKFLOW_LIBRARY=[
+  {id:'standard_flux',name:'Standard FLUX',desc:'Single-pass high-quality generation. Best for most projects.',models:['FLUX 1.1 Ultra'],useCase:['commercial_ad','product_video','design'],quality:9,costEst:'$0.06/img',steps:['Model Load','Prompt','Sample','Decode'],complexity:'Low'},
+  {id:'consistent_character',name:'Consistent Character',desc:'Face-lock workflow for maintaining character consistency across shots.',models:['FLUX Kontext','LoRA'],useCase:['short_film','music_video','testimonial'],quality:9,costEst:'$0.12/img',steps:['Model Load','Face Embed','Prompt','ControlNet','Sample','Decode'],complexity:'Medium'},
+  {id:'product_hero',name:'Product Hero Shot',desc:'Multi-step pipeline: background removal → lighting → compositing. Perfect for product showcases.',models:['FLUX 1.1 Ultra','Recraft V3'],useCase:['product_video','commercial_ad'],quality:10,costEst:'$0.15/img',steps:['Model Load','Segment','Remove BG','Relight','Composite','Upscale'],complexity:'High'},
+  {id:'style_transfer',name:'Style Transfer',desc:'Apply a reference style (painting, illustration, retro) consistently across all frames.',models:['FLUX Dev','LoRA'],useCase:['music_video','design','influencer_ugc'],quality:8,costEst:'$0.10/img',steps:['Style Extract','Model Load','Style Apply','Sample','Decode'],complexity:'Medium'},
+  {id:'text_overlay',name:'Text + Graphics',desc:'Generate images with accurate text rendering for posters, thumbnails, and social.',models:['Ideogram V2'],useCase:['design','youtube_explainer'],quality:8,costEst:'$0.05/img',steps:['Model Load','Text Encode','Prompt','Sample','Decode'],complexity:'Low'},
+  {id:'cinematic_upscale',name:'Cinematic Upscale',desc:'Two-pass: generate at standard → upscale 4x with detail enhancement.',models:['FLUX 1.1 Ultra','Real-ESRGAN'],useCase:['short_film','commercial_ad','music_video'],quality:10,costEst:'$0.20/img',steps:['Model Load','Prompt','Sample','Decode','Upscale 4x','Sharpen'],complexity:'Medium'},
+];
+
 const IMG_QUALITY=['standard','hd'];
 const IMG_TONES=['photorealistic','cinematic','illustration','editorial','minimal','vibrant','moody','warm','cool'];
 const WRITER_TYPES=[
@@ -527,6 +537,10 @@ const DB={
     _notifs.filter(n=>n.userId===uid).forEach(n=>{n.read=true;SB.push('studio_notifications',n.id,n);});
     _tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));
   },
+  clearNotifs:(uid)=>{
+    _notifs=_notifs.filter(n=>n.userId!==uid);
+    _tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));
+  },
   getIntegrations:()=>_integrations,
   saveIntegration:(intg)=>{
     const i=_integrations.findIndex(x=>x.id===intg.id);
@@ -588,6 +602,23 @@ function pushNotif(userId,type,title,body,projectId){
 function pushToRole(role,type,title,body,projectId){
   DB.getUsers().filter(u=>u.role===role&&u.active!==false).forEach(u=>pushNotif(u.id,type,title,body,projectId));
 }
+
+// V2: Branded email notification (fire-and-forget)
+function sendEmail(emailType,toEmail,data){
+  if(!toEmail)return;
+  data.platformUrl=data.platformUrl||window.location.origin;
+  fetch('/api/email',{method:'POST',headers:_authHeaders(),body:JSON.stringify({type:emailType,to:toEmail,data})}).catch(()=>{});
+}
+function emailForProject(emailType,pid,extraData){
+  const p=DB.getProject(pid);if(!p)return;
+  const cl=p.clientId?DB.getUser(p.clientId):null;
+  const cr=p.assignedCreatorId?DB.getUser(p.assignedCreatorId):null;
+  const base={projectName:p.name,projectId:p.projectId||'',projectType:MT[p.type]?.label||p.type,clientName:cl?.name||'',priority:p.priority||'medium',...(extraData||{})};
+  // Send to appropriate role based on email type
+  if(['project_started','synopsis_ready','delivery_ready'].includes(emailType)&&cl?.email){sendEmail(emailType,cl.email,base);}
+  if(['new_assignment','client_feedback','deadline_reminder'].includes(emailType)&&cr?.email){sendEmail(emailType,cr.email,base);}
+  if(emailType==='api_failure'){DB.getUsers().filter(u=>u.role==='admin'&&u.email).forEach(u=>sendEmail(emailType,u.email,base));}
+}
 function pushToCreatorOfProject(pid,type,title,body){
   const p=DB.getProject(pid);if(!p||!p.assignedCreatorId)return;pushNotif(p.assignedCreatorId,type,title,body,pid);
 }
@@ -615,7 +646,7 @@ function render(){
   const sb=document.getElementById('sbar');
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
-  app.innerHTML=appBarHTML()+mainHTML();
+  app.innerHTML=adminImpersonationBar()+appBarHTML()+mainHTML();
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -643,7 +674,7 @@ function loginHTML(){
 <div class="login-hero">
   <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
   <div class="login-hero-content">
-    <div class="login-hero-logo"><img src="/Logo.svg" alt="CinexAI" style="height:56px;width:auto"></div>
+    <div class="login-hero-logo">Cinex<span>AI</span></div>
     <div class="login-hero-tagline">AI-powered media production.<br>From brief to final cut.</div>
     <div class="login-hero-features">
       <div class="login-hero-feature"><div class="login-hero-feature-icon orange">◈</div>Produce</div>
@@ -653,7 +684,7 @@ function loginHTML(){
   </div>
 </div>
 <div class="login-form-panel"><div class="login-box">
-<div class="login-logo"><img src="/Logo.svg" alt="CinexAI" style="height:44px;width:auto"></div>
+<div class="login-logo">Cinex<span>AI</span></div>
 <div class="login-sub">Sign in to your production workspace</div>
 <div class="login-err" id="lerr"></div>
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
@@ -776,7 +807,7 @@ function appBarHTML(){
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
   const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
   return`<div class="app-bar">
-<div class="logo"><img src="/Logo.svg" alt="CinexAI" style="height:34px;width:auto"></div>
+<div class="logo">Cinex<span>AI</span></div>
 <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
 <span class="rb-${r}">${roleLabel}</span>
 <span class="app-bar-name">${S.session?.name}</span>
@@ -804,7 +835,7 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
 <div id="notif-panel" style="display:none;position:fixed;top:46px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:9px;z-index:300;overflow:hidden;box-shadow:0 8px 24px #000a">
 <div style="padding:9px 13px;background:var(--bg4);border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center">
 <span style="font-size:11px;font-weight:700;color:var(--gold)">Notifications</span>
-<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer">Mark all read</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:14px;cursor:pointer">✕</button></div>
+<div style="display:flex;gap:6px"><button onclick="markAllNotifsRead()" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer">Mark all read</button><button onclick="clearAllNotifs()" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer">Clear all</button><button onclick="toggleNotifPanel()" style="background:none;border:none;color:var(--t4);font-size:14px;cursor:pointer">✕</button></div>
 </div>
 <div id="notif-list" style="overflow-y:auto;max-height:380px"></div>
 </div>`;
@@ -813,25 +844,53 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
 function getKey(k){const u=DB.getUser(S.session?.userId);return u?.apiKeys?.[k]||''}
 function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:document.getElementById('k-c')?.value||'',fal:document.getElementById('k-f')?.value||'',el:document.getElementById('k-e')?.value||''};auditLog('api_keys_updated','Admin updated API keys');DB.saveUser(u);['c','f','e'].forEach((x,i)=>{const d=document.getElementById('kd'+x);const inp=document.getElementById('k-'+x);if(d)d.className='kdot'+(inp?.value?' ok':'');})}
 // kC / kF / kE defined above near genProjectId
+// ── Notification System (V2 — role-based, smart read/clear) ──
 function hasNotifs(){const uid=S.session?.userId;if(!uid)return false;return DB.getNotifs(uid).some(n=>!n.read);}
 function getUnreadCount(){const uid=S.session?.userId;if(!uid)return 0;return DB.getNotifs(uid).filter(n=>!n.read).length;}
-function toggleNotifPanel(){const p=document.getElementById('notif-panel');const uid=S.session?.userId;if(!p||!uid)return;const isOpen=p.style.display!=='none';p.style.display=isOpen?'none':'block';if(!isOpen){renderNotifList(uid);}}
-function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div class="notif-item" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#0d0a14'}"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');
-  // Event delegation — safe from XSS (no inline onclick with unescaped IDs)
-  list.querySelectorAll('.notif-item').forEach(el=>el.addEventListener('click',()=>clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype)));}
+function toggleNotifPanel(){
+  const p=document.getElementById('notif-panel');const uid=S.session?.userId;if(!p||!uid)return;
+  const isOpen=p.style.display!=='none';
+  if(isOpen){p.style.display='none';return;}
+  p.style.display='block';
+  renderNotifList(uid);
+  // Auto-mark all visible notifications as read when panel opens
+  setTimeout(()=>{DB.markAllRead(uid);updateNotifBadge();},1500);
+}
+function renderNotifList(uid){
+  const list=document.getElementById('notif-list');if(!list)return;
+  const ns=DB.getNotifs(uid).slice(0,50);
+  if(!ns.length){list.innerHTML='<div style="padding:32px;text-align:center"><div style="font-size:20px;opacity:0.15;margin-bottom:8px">🔔</div><div style="color:var(--t4);font-size:10px">No notifications</div></div>';return;}
+  const now=Date.now();
+  list.innerHTML=ns.map(n=>{
+    const age=now-new Date(n.ts).getTime();
+    const timeAgo=age<6e4?'just now':age<36e5?Math.floor(age/6e4)+'m ago':age<864e5?Math.floor(age/36e5)+'h ago':new Date(n.ts).toLocaleDateString();
+    const typeIcons={brief:'📋',synopsis:'✍️',approval:'✅',storyboard:'🎬',feedback:'💬',revision:'🔄',project:'📁',comment:'💬',complete:'🏁',account:'👤',delivery:'📦',api_failure:'⚠️'};
+    const icon=typeIcons[n.type]||'🔔';
+    return`<div class="notif-item${n.read?' notif-read':' notif-unread'}" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}">
+<div class="notif-dot-wrap"><div class="notif-dot${n.read?'':' active'}"></div></div>
+<div class="notif-icon">${icon}</div>
+<div class="notif-content"><div class="notif-title">${esc(n.title)}</div><div class="notif-body">${esc(n.body)}</div><div class="notif-time">${timeAgo}</div></div>
+</div>`;}).join('');
+  list.querySelectorAll('.notif-item').forEach(el=>el.addEventListener('click',()=>clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype)));
+}
 function clickNotif(nid,pid,type){
   DB.markNotifRead(nid);
   if(pid){
     S.pid=pid;S.tab='studio';
-    // Open directly to comments for comment notifications
     if(type==='comment'){S.stage=98;markCommentsRead(pid,S.session?.userId);}
     else{S.stage=1;}
-    render();
   }
   document.getElementById('notif-panel').style.display='none';
   updateNotifBadge();
+  render();
 }
 function markAllNotifsRead(){const uid=S.session?.userId;if(!uid)return;DB.markAllRead(uid);renderNotifList(uid);updateNotifBadge();}
+function clearAllNotifs(){
+  const uid=S.session?.userId;if(!uid)return;
+  DB.clearNotifs(uid);
+  renderNotifList(uid);updateNotifBadge();
+  toast('Notifications cleared','ok');
+}
 function updateNotifBadge(){const b=document.getElementById('notif-badge');if(!b)return;const cnt=getUnreadCount();b.textContent=cnt;b.style.display=cnt?'flex':'none';}
 function goTab(t){saveInputs();S.tab=t;if(t!=='studio')S.pid=null;render()}
 
@@ -868,7 +927,7 @@ function adminDashboard(){
     return true;
   });
   // Stats for filtered period
-  const complete=flt.filter(p=>p.workflowStatus==='complete').length;
+  const complete=flt.filter(p=>['ready_for_delivery','delivered'].includes(p.workflowStatus)).length;
   const inProd=flt.filter(p=>['storyboard_in_progress','storyboard_review'].includes(p.workflowStatus)).length;
   const inSyn=flt.filter(p=>['brief_submitted','synopsis_review','synopsis_locked'].includes(p.workflowStatus)).length;
   const hour=new Date().getHours();
@@ -894,7 +953,7 @@ ${(()=>{
   // Calculate week-over-week deltas
   const weekAgo=new Date(Date.now()-7*864e5);
   const newThisWeek=ps.filter(p=>p.createdAt&&new Date(p.createdAt)>weekAgo).length;
-  const completedThisWeek=ps.filter(p=>p.workflowStatus==='complete'&&p.updatedAt&&new Date(p.updatedAt)>weekAgo).length;
+  const completedThisWeek=ps.filter(p=>['ready_for_delivery','delivered'].includes(p.workflowStatus)&&p.updatedAt&&new Date(p.updatedAt)>weekAgo).length;
   const newClientsThisWeek=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>weekAgo).length;
   function delta(n){return n>0?`<span style="color:var(--green);font-size:8px">+${n} this week</span>`:n<0?`<span style="color:var(--red);font-size:8px">${n} this week</span>`:''}
   return[
@@ -902,7 +961,7 @@ ${(()=>{
   {n:clients.length,d:delta(newClientsThisWeek),l:'Clients',icon:'◉',grad:'var(--grad-ai)',f:{},tab:'clients'},
   {n:creators.length,d:'',l:'Creators',icon:'✦',grad:'linear-gradient(135deg,#3B82F6,#06B6D4)',f:{},tab:'creators'},
   {n:needs.length,d:needs.length?`<span style="color:var(--warning);font-size:8px">action needed</span>`:'',l:'Need Attention',icon:'⚡',grad:'linear-gradient(135deg,#EF4444,#FF6B35)',f:{},tab:'projects',glow:needs.length>0},
-  {n:complete,d:delta(completedThisWeek),l:'Complete',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'complete'},tab:'projects'},
+  {n:complete,d:delta(completedThisWeek),l:'Delivered',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'delivered'},tab:'projects'},
   {n:inProd,d:'',l:'In Production',icon:'▶',grad:'linear-gradient(135deg,#06B6D4,#8B5CF6)',f:{status:'storyboard_in_progress'},tab:'projects'},
   {n:inSyn,d:'',l:'In Review',icon:'◎',grad:'linear-gradient(135deg,#F59E0B,#FF6B35)',f:{status:'synopsis_review'},tab:'projects'}
 ].map(s=>`<div class="dash-tile${s.glow?' dash-tile-glow':''}" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')">
@@ -912,6 +971,32 @@ ${(()=>{
   ${s.d?`<div style="margin-top:4px">${s.d}</div>`:''}
 </div>`).join('');})()}
 </div>
+<!-- Creator Bandwidth Strip -->
+${creators.length?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+<div style="font-size:11px;font-weight:700;color:var(--t1)">Creator Bandwidth</div>
+<button class="btn btn-ghost btn-sm" onclick="goTab('creators')" style="font-size:8px">Manage →</button>
+</div>
+<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px">
+${creators.map(c=>{
+  const cap=c.capacity||5;
+  const active=ps.filter(p=>p.assignedCreatorId===c.id&&!['ready_for_delivery','delivered'].includes(p.workflowStatus)).length;
+  const pct=Math.min(100,Math.round((active/cap)*100));
+  const col=pct>=80?'var(--red)':pct>=50?'var(--gold)':'var(--green)';
+  const status=pct>=100?'Full':pct>=80?'Near capacity':pct>=50?'Moderate':'Available';
+  return`<div style="flex-shrink:0;min-width:140px;background:var(--bg3);border:1px solid var(--b1);border-radius:8px;padding:10px 12px">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+<div class="uav uav-creator" style="width:22px;height:22px;font-size:9px">${(c.name[0]||'?').toUpperCase()}</div>
+<div style="font-size:10px;font-weight:600;color:var(--t1)">${esc(c.name)}</div>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+<span style="font-size:9px;color:${col};font-weight:600">${active}/${cap}</span>
+<span style="font-size:8px;color:${col}">${status}</span>
+</div>
+<div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden">
+<div style="height:100%;width:${pct}%;background:${col};border-radius:2px;transition:width .3s"></div>
+</div></div>`;}).join('')}
+</div></div>`:''}
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
@@ -927,7 +1012,7 @@ ${(()=>{
 <option value="">All Types</option>${Object.entries(MT).map(([k,m])=>`<option value="${k}"${df.type===k?' selected':''}>${m.label}</option>`).join('')}</select></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Status</div>
 <select onchange="S.dashF={...S.dashF||{},status:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
-<option value="">All Statuses</option>${['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].map(s=>`<option value="${s}"${df.status===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select></div>
+<option value="">All Statuses</option>${['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].map(s=>`<option value="${s}"${df.status===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">From</div>
 <input type="date" value="${df.from||''}" onchange="S.dashF={...S.dashF||{},from:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">To</div>
@@ -999,7 +1084,7 @@ function adminProjRow(p){
 <td><code style="font-size:9px;color:var(--gold);font-family:monospace">${p.projectId||'—'}</code></td>
 <td>${client?`<span style="font-size:10px">${esc(client.name)}</span><div style="font-size:8px;color:var(--t4)">${client.clientId||''}</div>`:'<span style="color:var(--t4)">—</span>'}</td>
 <td><span class="badge badge-gray">${mt?.label||p.type}</span></td>
-<td><span class="badge badge-${alert?'red':wf==='complete'?'green':'gold'}">${wf.replace(/_/g,' ')}</span></td>
+<td><span class="badge badge-${alert?'red':wf==='delivered'?'green':wf==='ready_for_delivery'?'cyan':'gold'}">${wf.replace(/_/g,' ')}</span></td>
 <td><span style="font-size:10px;color:var(--t3)">${emp?esc(emp.name):'Unassigned'}</span></td>
 <td style="font-size:9px;color:var(--t4)">${p.updatedAt?new Date(p.updatedAt).toLocaleDateString():''}${(p.comments||[]).length?`<div style="font-size:8px;color:var(--blue);margin-top:1px">💬 ${p.comments.length}</div>`:''}</td>
 <td><div style="display:flex;gap:4px">
@@ -1051,7 +1136,7 @@ function adminProjects(){
 <select onchange="S.projF={...S.projF||{},type:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Types</option>${Object.entries(MT).map(([k,m])=>`<option value="${k}"${df.type===k?' selected':''}>${m.label}</option>`).join('')}</select>
 <select onchange="S.projF={...S.projF||{},status:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
-<option value="">All Statuses</option>${['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].map(s=>`<option value="${s}"${df.status===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
+<option value="">All Statuses</option>${['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].map(s=>`<option value="${s}"${df.status===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
 <select onchange="S.projF={...S.projF||{},priority:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Priorities</option><option value="high"${df.priority==='high'?' selected':''}>🔴 High</option><option value="medium"${df.priority==='medium'?' selected':''}>● Medium</option><option value="low"${df.priority==='low'?' selected':''}>○ Low</option></select>
 <select onchange="S.projSort=this.value;render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
@@ -1089,7 +1174,8 @@ function projKanban(projects){
     {id:'synopsis_locked',label:'Synopsis Approved',color:'var(--green)',icon:'✓'},
     {id:'storyboard_in_progress',label:'Storyboard',color:'var(--purple)',icon:'🎨'},
     {id:'storyboard_review',label:'Client Review',color:'var(--gold)',icon:'👁'},
-    {id:'complete',label:'Complete',color:'var(--green)',icon:'✓✓'},
+    {id:'ready_for_delivery',label:'Ready for Delivery',color:'var(--cyan)',icon:'📦'},
+    {id:'delivered',label:'Delivered',color:'var(--green)',icon:'✓✓'},
   ];
   const hideCols=S.kanbanHide||{};
   const allProjects=DB.getProjects(); // total counts ignore filters
@@ -1109,7 +1195,7 @@ ${cols.map(col=>{
 <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:16px;align-items:flex-start">
 ${cols.filter(col=>!hideCols[col.id]).map(col=>{
   const colPs=projects.filter(p=>(p.workflowStatus||'new')===col.id);
-  const overdue=colPs.filter(p=>p.deadline&&new Date(p.deadline)<new Date()&&col.id!=='complete').length;
+  const overdue=colPs.filter(p=>p.deadline&&new Date(p.deadline)<new Date()&&!['ready_for_delivery','delivered'].includes(col.id)).length;
   return`<div style="flex:0 0 235px;background:var(--bg2);border:1px solid var(--b1);border-top:2px solid ${col.color};border-radius:9px;overflow:hidden">
 <!-- Column header -->
 <div style="padding:9px 12px;border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:7px">
@@ -1144,7 +1230,7 @@ function kanbanCard(p){
   const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const unread=getUnreadCommentCount(p,S.session?.userId);
   const alert=p.pendingFeedback||p.newBrief;
-  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(p.workflowStatus||'new')+1)/6*100);
+  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].indexOf(p.workflowStatus||'new')+1)/7*100);
   return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'var(--red)55':isAtRisk?'var(--warning)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
   onmouseover="this.style.borderColor='${accent}44';this.style.transform='translateY(-1px)'"
   onmouseout="this.style.borderColor='${isOverdue?'var(--red)55':isAtRisk?'var(--warning)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'}';this.style.transform=''"
@@ -1169,7 +1255,7 @@ ${cr?`<div style="font-size:9px;color:var(--blue);margin-bottom:2px;overflow:hid
 ${(p.tags||[]).length?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin:4px 0">${p.tags.slice(0,2).map(t=>`<span style="font-size:7px;background:var(--bg4);color:var(--t4);padding:1px 5px;border-radius:8px;border:1px solid var(--b2)">#${esc(t)}</span>`).join('')}${p.tags.length>2?`<span style="font-size:7px;color:var(--t4)">+${p.tags.length-2}</span>`:''}</div>`:''}
 <!-- Progress bar -->
 <div style="height:2px;background:var(--bg4);border-radius:1px;overflow:hidden;margin:6px 0 5px">
-<div style="height:100%;width:${progress}%;background:${p.workflowStatus==='complete'?'var(--green)':accent};border-radius:1px;transition:width .3s"></div>
+<div style="height:100%;width:${progress}%;background:${p.workflowStatus==='delivered'?'var(--green)':accent};border-radius:1px;transition:width .3s"></div>
 </div>
 <!-- Footer: deadline + badges + actions -->
 <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1196,9 +1282,9 @@ function projCards(projects){
 ${projects.map(p=>{
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
   const wf=p.workflowStatus||'new';const now=new Date();
-  const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
+  const isOverdue=p.deadline&&new Date(p.deadline)<now&&!['ready_for_delivery','delivered'].includes(wf);
   const alert=p.pendingFeedback||p.newBrief;
-  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf)+1)/6*100);
+  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].indexOf(wf)+1)/7*100);
   return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'var(--red)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
 <div style="padding:12px 14px;border-bottom:1px solid var(--b1)">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:7px">
@@ -1206,7 +1292,7 @@ ${projects.map(p=>{
 <div style="display:flex;gap:4px;flex-wrap:wrap">
 ${{high:'<span style="font-size:8px;color:var(--red);font-weight:700">🔴 HIGH</span>',low:'<span style="font-size:8px;color:var(--t4)">○ LOW</span>'}[p.priority||'']||''}
 ${alert?'<span class="badge badge-red" style="font-size:7px">Action needed</span>':''}
-<span class="badge badge-${wf==='complete'?'green':wf.includes('review')?'gold':'gray'}" style="font-size:7px">${wf.replace(/_/g,' ')}</span>
+<span class="badge badge-${wf==='delivered'?'green':wf==='ready_for_delivery'?'cyan':wf.includes('review')?'gold':'gray'}" style="font-size:7px">${wf.replace(/_/g,' ')}</span>
 </div></div>
 <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:3px;line-height:1.3">${esc(p.name)}</div>
 <div style="font-size:8px;color:var(--gold);font-family:monospace;margin-bottom:5px">${p.projectId||'—'}</div>
@@ -1216,7 +1302,7 @@ ${p.tags?.length?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px
 </div>
 <div style="padding:8px 14px">
 <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t4);margin-bottom:3px"><span>${progress}%</span>${p.deadline?`<span style="color:${isOverdue?'var(--red)':'var(--t4)'}">${isOverdue?'⚠ Overdue':'📅 '+new Date(p.deadline).toLocaleDateString()}</span>`:''}</div>
-<div style="height:3px;background:var(--bg4);border-radius:2px;overflow:hidden"><div style="height:100%;width:${progress}%;background:${wf==='complete'?'var(--green)':'var(--gold)'};border-radius:2px"></div></div>
+<div style="height:3px;background:var(--bg4);border-radius:2px;overflow:hidden"><div style="height:100%;width:${progress}%;background:${wf==='delivered'?'var(--green)':wf==='ready_for_delivery'?'var(--cyan)':'var(--gold)'};border-radius:2px"></div></div>
 ${wfMiniDots(p)}
 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px">
 <span></span>
@@ -1235,7 +1321,7 @@ function projTable(projects){
 <tbody>${projects.map(p=>{
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
   const wf=p.workflowStatus||'new';const now=new Date();
-  const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
+  const isOverdue=p.deadline&&new Date(p.deadline)<now&&!['ready_for_delivery','delivered'].includes(wf);
   const alert=p.pendingFeedback||p.newBrief;
   const priIcon={high:'🔴',medium:'🟡',low:'⚪'}[p.priority||'medium'];
   return`<tr style="cursor:pointer" onclick="S.detailPid='${p.id}';render()">
@@ -1246,7 +1332,7 @@ ${(p.tags||[]).length?`<div style="display:flex;gap:2px;margin-top:2px">${p.tags
 <td><code style="font-size:9px;color:var(--gold)">${p.projectId||'—'}</code></td>
 <td>${cl?`<div style="font-size:10px;color:var(--t2)">${esc(cl.name)}</div><div style="font-size:8px;color:var(--t4)">${cl.clientId||''}</div>`:'<span style="color:var(--t4)">—</span>'}</td>
 <td><span style="font-size:10px;color:var(--blue)">${cr?esc(cr.name):'<span style="color:var(--t4)">—</span>'}</span></td>
-<td><span class="badge badge-${alert?'red':wf==='complete'?'green':'gold'}">${wf.replace(/_/g,' ')}</span></td>
+<td><span class="badge badge-${alert?'red':wf==='delivered'?'green':wf==='ready_for_delivery'?'cyan':'gold'}">${wf.replace(/_/g,' ')}</span></td>
 <td>${priIcon} <span style="font-size:9px;color:var(--t4)">${p.priority||'medium'}</span></td>
 <td><span style="font-size:9px;color:${isOverdue?'var(--red)':'var(--t4)'}">${p.deadline?new Date(p.deadline).toLocaleDateString():'—'}</span>${isOverdue?'<div style="font-size:8px;color:var(--red)">overdue</div>':''}</td>
 <td style="font-size:9px;color:var(--t4)">${p.updatedAt?new Date(p.updatedAt).toLocaleDateString():''}
@@ -1265,9 +1351,9 @@ function projDetailPage(p){
   const creators=DB.getUsers().filter(u=>u.role==='creator');
   const clients=DB.getUsers().filter(u=>u.role==='client');
   const wf=p.workflowStatus||'new';const now=new Date();
-  const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
+  const isOverdue=p.deadline&&new Date(p.deadline)<now&&!['ready_for_delivery','delivered'].includes(wf);
   const atRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf)+1)/6*100);
+  const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].indexOf(wf)+1)/7*100);
   const priColor={high:'var(--red)',medium:'var(--gold)',low:'var(--t4)'};
   return`<div class="page">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
@@ -1292,7 +1378,7 @@ ${atRisk?`<div style="background:#120d00;border:1px solid var(--warning)44;borde
 
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
 ${[
-  {l:'Status',v:wf.replace(/_/g,' '),c:wf==='complete'?'var(--green)':wf.includes('review')?'var(--gold)':'var(--t2)'},
+  {l:'Status',v:wf.replace(/_/g,' '),c:wf==='delivered'?'var(--green)':wf==='ready_for_delivery'?'var(--cyan)':wf.includes('review')?'var(--gold)':'var(--t2)'},
   {l:'Progress',v:progress+'%',c:'var(--green)'},
   {l:'Priority',v:(p.priority||'medium').toUpperCase(),c:{high:'var(--red)',medium:'var(--gold)',low:'var(--t4)'}[p.priority||'medium']},
   {l:'Deadline',v:p.deadline?new Date(p.deadline).toLocaleDateString():'Not set',c:isOverdue?'var(--red)':atRisk?'#FF8A5C':'var(--t3)'},
@@ -1304,7 +1390,7 @@ ${[
 <div style="margin-bottom:18px">
 <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t4);margin-bottom:4px"><span>Workflow Progress</span><span>${progress}%</span></div>
 <div style="height:5px;background:var(--bg4);border-radius:3px;overflow:hidden">
-<div style="height:100%;width:${progress}%;background:${wf==='complete'?'var(--green)':'var(--gold)'};border-radius:3px;transition:width .4s"></div>
+<div style="height:100%;width:${progress}%;background:${wf==='delivered'?'var(--green)':wf==='ready_for_delivery'?'var(--cyan)':'var(--gold)'};border-radius:3px;transition:width .4s"></div>
 </div>
 ${wfMiniDots(p)}
 </div>
@@ -1348,7 +1434,12 @@ ${wf==='storyboard_in_progress'?`<button class="btn btn-green" style="grid-colum
 ${wf==='storyboard_review'&&p.pendingFeedback?`<button class="btn btn-red btn-sm" style="grid-column:1/-1" onclick="openStudio('${p.id}');setTimeout(()=>{S.stage=2;S.step=2;render()},100)">⚠ View Client Feedback</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="showEditProjModal('${p.id}')">✏ Edit Details</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">👤 Assign</button>
-${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:'<span class="badge badge-green" style="grid-column:1/-1;text-align:center;padding:6px">✓✓ Project Complete</span>'}
+<button class="btn btn-purple btn-sm" onclick="pmRecommendCreator('${p.id}')" title="AI PM suggests best creator">✦ PM: Assign</button>
+<button class="btn btn-purple btn-sm" onclick="pmProjectAnalysis('${p.id}')" title="AI PM project analysis">✦ PM: Analyse</button>
+${p.clientId?`<button class="btn btn-purple btn-sm" onclick="showBrandFolderModal('${p.clientId}')" title="View/edit brand folder">✦ Brand Folder</button>`:''}
+${!['ready_for_delivery','delivered'].includes(wf)?`<button class="btn btn-cyan btn-sm" style="grid-column:1/-1" onclick="showDeliveryUploadModal('${p.id}')">📦 Upload & Deliver</button>`:''}
+${wf==='ready_for_delivery'?`<button class="btn btn-gold btn-sm" style="grid-column:1/-1" onclick="showDeliveryUploadModal('${p.id}')">✏ Edit Deliverables</button>`:''}
+${wf==='delivered'?'<span class="badge badge-green" style="grid-column:1/-1;text-align:center;padding:6px">✓✓ Delivered & Approved</span>':''}
 </div>
 </div>
 
@@ -1409,15 +1500,83 @@ function doEditProj(pid){
   p.notes=document.getElementById('ep-notes')?.value.trim()||'';
   DB.saveProject(p);closeModal();render();toast('Project updated!','ok');
 }
-function markProjComplete(pid){
-  if(!confirm('Mark this project as complete?'))return;
+// ── Delivery Pipeline ──
+function showDeliveryUploadModal(pid){
   const p=DB.getProject(pid);if(!p)return;
+  openModal(`<div class="modal-title">Upload Deliverables</div>
+<div class="ib ib-blue" style="margin-bottom:12px">Upload the final media files for <strong>${esc(p.name)}</strong>. The client will be notified and can preview, download, or request revisions.</div>
+<div class="fg"><label>Delivery Notes</label><textarea id="del-notes" rows="3" placeholder="Describe what's included in this delivery...">${esc(p.deliveryNotes||'')}</textarea></div>
+<div class="fg"><label>Final Video URL</label><input type="text" id="del-video" placeholder="https://... (direct link to video file)" value="${esc(p.deliveryFiles?.video||'')}"/></div>
+<div class="fg"><label>Final Image/Thumbnail URL</label><input type="text" id="del-thumb" placeholder="https://... (thumbnail or hero image)" value="${esc(p.deliveryFiles?.thumbnail||'')}"/></div>
+<div class="fg"><label>Additional Files (comma-separated URLs)</label><input type="text" id="del-extra" placeholder="https://file1.mp4, https://file2.png" value="${esc((p.deliveryFiles?.extras||[]).join(', '))}"/></div>
+<div class="btn-row">
+<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+<button class="btn btn-gold" onclick="saveDelivery('${p.id}')">Save Deliverables</button>
+<button class="btn btn-green" onclick="saveAndPublishDelivery('${p.id}')">Save & Notify Client →</button>
+</div>`);
+}
+
+function saveDelivery(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  p.deliveryNotes=document.getElementById('del-notes')?.value.trim()||'';
+  p.deliveryFiles={
+    video:document.getElementById('del-video')?.value.trim()||'',
+    thumbnail:document.getElementById('del-thumb')?.value.trim()||'',
+    extras:(document.getElementById('del-extra')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)
+  };
+  DB.saveProject(p);closeModal();render();toast('Deliverables saved!','ok');
+}
+
+function saveAndPublishDelivery(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  p.deliveryNotes=document.getElementById('del-notes')?.value.trim()||'';
+  p.deliveryFiles={
+    video:document.getElementById('del-video')?.value.trim()||'',
+    thumbnail:document.getElementById('del-thumb')?.value.trim()||'',
+    extras:(document.getElementById('del-extra')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)
+  };
+  if(!p.deliveryFiles.video&&!p.deliveryFiles.extras.length){toast('Add at least one file before publishing','err');return;}
   if(!p.stageHistory)p.stageHistory=[];
-  p.stageHistory.push({stage:'complete',enteredAt:new Date().toISOString()});
-  p.workflowStatus='complete';
-  DB.saveProject(p);render();toast('Project marked complete!','ok');
-  pushToRole('admin','complete','Project complete',p.name+' has been marked complete',p.id);
-  if(p.clientId)pushNotif(p.clientId,'complete','Project complete!',p.name+' has been finalised.',p.id);
+  p.stageHistory.push({stage:'ready_for_delivery',enteredAt:new Date().toISOString()});
+  p.workflowStatus='ready_for_delivery';
+  p.deliveryPublishedAt=new Date().toISOString();
+  DB.saveProject(p);closeModal();render();toast('Delivery published — client notified!','ok');
+  if(p.clientId)pushNotif(p.clientId,'delivery','Your content is ready! 🎬',p.name+' — your final deliverables are ready for review and download.',p.id);
+  emailForProject('delivery_ready',p.id);
+  pushToRole('admin','delivery','Delivery published',p.name+' ready for client review',p.id);
+}
+
+function clientApproveDelivery(){
+  if(!confirm('Approve this delivery? The project will be marked as complete.'))return;
+  const p=DB.getProject(S.pid);if(!p)return;
+  if(!p.stageHistory)p.stageHistory=[];
+  p.stageHistory.push({stage:'delivered',enteredAt:new Date().toISOString()});
+  p.workflowStatus='delivered';
+  p.deliveryApprovedAt=new Date().toISOString();
+  DB.saveProject(p);render();toast('Delivery approved — project complete!','ok');
+  pushToRole('admin','complete','Delivery approved ✓',p.name+' — client has approved the final delivery',p.id);
+  if(p.assignedCreatorId)pushNotif(p.assignedCreatorId,'complete','Delivery approved!',p.name+' — client approved. Project complete.',p.id);
+}
+
+function clientRequestDeliveryRevision(){
+  const fb=document.getElementById('del-rev-fb')?.value.trim();
+  if(!fb){toast('Please describe what needs to change','err');return;}
+  const p=DB.getProject(S.pid);if(!p)return;
+  if(!p.deliveryRevisions)p.deliveryRevisions=[];
+  p.deliveryRevisions.push({feedback:fb,timestamp:new Date().toISOString(),by:S.session?.name||'Client'});
+  p.workflowStatus='storyboard_review';// send back to review stage for rework
+  if(!p.stageHistory)p.stageHistory=[];
+  p.stageHistory.push({stage:'delivery_revision',enteredAt:new Date().toISOString()});
+  p.pendingFeedback='delivery';
+  DB.saveProject(p);render();toast('Revision requested','ok');
+  if(p.assignedCreatorId)pushNotif(p.assignedCreatorId,'revision','Delivery revision requested',p.name+' — client has requested changes to the delivery',p.id);
+  pushToRole('admin','revision','Delivery revision',p.name+' — client requested delivery changes',p.id);
+}
+
+function markProjComplete(pid){
+  if(!confirm('Mark this project as ready for delivery?'))return;
+  const p=DB.getProject(pid);if(!p)return;
+  showDeliveryUploadModal(pid);
 }
 
 function adminClients(){
@@ -1441,6 +1600,7 @@ function adminClients(){
 <td><span style="font-size:10px;color:${emp?'var(--blue)':'var(--t4)'}">${emp?esc(emp.name):'Unassigned'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
 <td><div style="display:flex;gap:4px">
+<button class="btn btn-purple btn-sm" onclick="showBrandFolderModal('${c.id}')" title="AI PM Knowledge Base">✦ Brand Folder${(()=>{const s=brandFolderScore(c.id);return s>0?` (${s}%)`:''})()}</button>
 <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${c.id}')">Edit</button>
 <button class="btn btn-blue btn-sm" onclick="viewAsClient('${c.id}')">View Portal</button>
 <button class="btn btn-${c.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${c.id}')">${c.active!==false?'Deactivate':'Activate'}</button>
@@ -1460,11 +1620,12 @@ function adminCreators(){
 </div>
 ${emps.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
 ${emps.map(e=>{
-  const activeProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus!=='complete');
-  const completedProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus==='complete');
+  const activeProjects=ps.filter(p=>p.assignedCreatorId===e.id&&!['ready_for_delivery','delivered'].includes(p.workflowStatus));
+  const completedProjects=ps.filter(p=>p.assignedCreatorId===e.id&&['ready_for_delivery','delivered'].includes(p.workflowStatus));
   const assignedClients=(e.assignedClients||[]).map(cid=>DB.getUser(cid)).filter(Boolean);
+  const cap=e.capacity||maxProjects;
   const workload=activeProjects.length;
-  const pct=Math.min(100,Math.round((workload/maxProjects)*100));
+  const pct=Math.min(100,Math.round((workload/cap)*100));
   const wColor=pct>=80?'var(--red)':pct>=50?'var(--gold)':'var(--green)';
   // Detect specialities from project types
   const specialities=[...new Set(ps.filter(p=>p.assignedCreatorId===e.id).map(p=>p.type).filter(Boolean))];
@@ -1480,7 +1641,7 @@ ${emps.map(e=>{
 <div style="padding:14px 18px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <span style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700;letter-spacing:.06em">Workload</span>
-    <span style="font-size:10px;color:${wColor};font-weight:700">${workload}/${maxProjects} active</span>
+    <span style="font-size:10px;color:${wColor};font-weight:700">${workload}/${cap} active</span>
   </div>
   <div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden;margin-bottom:12px">
     <div style="height:100%;width:${pct}%;background:${wColor};border-radius:2px;transition:width .3s"></div>
@@ -1493,6 +1654,7 @@ ${emps.map(e=>{
   </div>
   <div style="display:flex;gap:4px">
     <button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
+    <button class="btn btn-blue btn-sm" onclick="viewAsCreator('${e.id}')">View Portal</button>
     <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
     <button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Off':'On'}</button>
   </div>
@@ -1791,7 +1953,7 @@ function sProjectTimeline(p){
 
   // Build stage segments from history
   const segments=[];
-  const orderedStages=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'];
+  const orderedStages=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'];
   const histMap={};
   (history||[]).forEach(h=>{if(!histMap[h.stage])histMap[h.stage]=h.enteredAt;});
   if(!histMap['brief_submitted']&&!histMap['new'])histMap['brief_submitted']=createdAt;
@@ -1949,7 +2111,7 @@ function adminTimeline(){
     rows+=`<line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y+ROW_H}" stroke="#1e1e1e" stroke-width="1"/>`;
 
     // Stage bar — draw each segment
-    const orderedStages=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'];
+    const orderedStages=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'];
     const histMap={};
     history.forEach(h=>{if(!histMap[h.stage])histMap[h.stage]=h.enteredAt;});
     if(!histMap['brief_submitted']&&!histMap['new'])histMap['brief_submitted']=created;
@@ -2174,20 +2336,44 @@ function adminLD(){
     return true;
   });
   const counts={trend:all.filter(e=>e.type==='trend').length,skill:all.filter(e=>e.type==='skill').length,creator:all.filter(e=>e.type==='creator').length,workflow:all.filter(e=>e.type==='workflow').length};
-  const typeColors={trend:'var(--gold)',skill:'var(--blue)',creator:'var(--purple)',workflow:'var(--green)'};
-  const typeIcons={trend:'📈',skill:'🎯',creator:'👁',workflow:'⚙'};
+  const typeColors={trend:'var(--gold)',skill:'var(--blue)',creator:'var(--purple)',workflow:'var(--green)',agent_pm:'var(--cyan)',agent_writer:'var(--gold)',agent_image:'var(--purple)',agent_video:'var(--red)'};
+  const typeIcons={trend:'📈',skill:'🎯',creator:'👁',workflow:'⚙',agent_pm:'🤖',agent_writer:'✍️',agent_image:'🖼',agent_video:'🎬'};
+  // Agent training counts
+  const agentCounts={pm:all.filter(e=>e.agentType==='pm').length,writer:all.filter(e=>e.agentType==='writer').length,image:all.filter(e=>e.agentType==='image').length,video:all.filter(e=>e.agentType==='video').length};
+  const totalAgentTraining=agentCounts.pm+agentCounts.writer+agentCounts.image+agentCounts.video;
   return`<div class="page">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
 <div>
-<div class="page-title">L&D Knowledge Base</div>
-<div class="page-sub">Skills, Workflows, Trends, and Creator profiles powering your AI generation</div>
+<div class="page-title">L&D — AI Training Hub</div>
+<div class="page-sub">Train AI agents, manage skills, workflows, and trends</div>
 </div>
 <div class="btn-row" style="margin-top:0">
 <button class="btn btn-gold" onclick="showAddLDModal()">+ Add Entry</button>
+<button class="btn btn-purple" onclick="showAgentTrainingModal()">✦ Train Agent</button>
 <button class="btn btn-outline" onclick="runTrendAgent()">✦ Run Trend Agent</button>
-<button class="btn btn-ghost btn-sm" onclick="sbPullLD()">↓ Sync from Supabase</button>
+<button class="btn btn-ghost btn-sm" onclick="sbPullLD()">↓ Sync</button>
 </div>
 </div>
+
+<!-- Agent Training Hub -->
+<div style="background:var(--bg2);border:1px solid rgba(139,92,246,0.15);border-radius:10px;padding:14px;margin-bottom:16px">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+<span style="font-size:14px;background:var(--grad-ai);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:800">✦</span>
+<div><div style="font-size:12px;font-weight:700;color:var(--t1)">Agent Training Hub</div>
+<div style="font-size:9px;color:var(--t4)">${totalAgentTraining} training materials uploaded across ${Object.values(agentCounts).filter(n=>n>0).length} agents</div></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+${[
+  {id:'pm',label:'AI Project Manager',icon:'🤖',desc:'Brand folders, competitor reports, strategy guides',color:'var(--cyan)'},
+  {id:'writer',label:'AI Writers',icon:'✍️',desc:'Award-winning scripts, ad copy, viral content examples',color:'var(--gold)'},
+  {id:'image',label:'Image Generation',icon:'🖼',desc:'Reference libraries, prompt templates, LoRA datasets',color:'var(--purple)'},
+  {id:'video',label:'Video Generation',icon:'🎬',desc:'Workflow files, motion references, transition styles',color:'var(--red)'}
+].map(a=>`<div style="background:var(--bg3);border:1px solid var(--b1);border-top:2px solid ${a.color};border-radius:8px;padding:10px 12px;cursor:pointer;transition:transform .15s" onclick="showAgentTrainingModal('${a.id}')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:16px">${a.icon}</span><span style="font-size:18px;font-weight:800;color:${a.color}">${agentCounts[a.id]||0}</span></div>
+<div style="font-size:10px;font-weight:700;color:var(--t1);margin-bottom:2px">${a.label}</div>
+<div style="font-size:8px;color:var(--t4);line-height:1.4">${a.desc}</div>
+</div>`).join('')}
+</div></div>
 
 <!-- Stats -->
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
@@ -2367,6 +2553,57 @@ function saveLDEntry(existingId){
   DB.saveLDEntry(entry);closeModal();render();toast('Saved!','ok');
 }
 
+// ══════════════════════════════════════
+// AGENT TRAINING HUB (V2)
+// ══════════════════════════════════════
+function showAgentTrainingModal(agentType){
+  const agents=[
+    {id:'pm',label:'AI Project Manager',icon:'🤖',desc:'Train your PM with brand strategy, competitor intel, and industry reports.',examples:'Brand guidelines PDFs, competitor analysis links, market trend articles, case studies'},
+    {id:'writer',label:'AI Writers',icon:'✍️',desc:'Feed award-winning scripts, high-engagement posts, and successful formats.',examples:'Cannes Lions scripts, viral ad copy, high-retention YouTube hooks, brand voice examples'},
+    {id:'image',label:'Image Generation',icon:'🖼',desc:'Upload reference images, prompt libraries, and visual style guides.',examples:'Mood boards, reference image sets, prompt template files, style guide PDFs'},
+    {id:'video',label:'Video Generation',icon:'🎬',desc:'Add motion references, transition styles, and cinematography guides.',examples:'Reference video links, shot composition guides, color grading references'}
+  ];
+  const sel=agentType||'pm';
+  const agent=agents.find(a=>a.id===sel)||agents[0];
+  const existing=DB.getLDEntries().filter(e=>e.agentType===sel);
+  openModal(`<div class="modal-title"><span style="font-size:14px">${agent.icon}</span> Train ${agent.label}</div>
+<div class="ib ib-blue" style="margin-bottom:12px">${agent.desc}<br><strong>Examples:</strong> ${agent.examples}</div>
+<div style="display:flex;gap:6px;margin-bottom:14px">
+${agents.map(a=>`<button onclick="closeModal();showAgentTrainingModal('${a.id}')" style="flex:1;padding:8px;border-radius:6px;border:2px solid ${sel===a.id?'var(--purple)':'var(--b2)'};background:${sel===a.id?'rgba(139,92,246,0.08)':'var(--bg3)'};color:${sel===a.id?'var(--purple)':'var(--t4)'};cursor:pointer;font-size:9px;font-weight:700;font-family:inherit;text-align:center">${a.icon} ${a.label.replace('AI ','')}</button>`).join('')}
+</div>
+<div class="fg"><label>Title</label><input type="text" id="at-title" placeholder="e.g. Cannes Lions 2025 Best Ads Collection"/></div>
+<div class="fg"><label>Description</label><textarea id="at-desc" rows="2" placeholder="What is this training material and why is it valuable?"></textarea></div>
+<div class="fg"><label>Source URL (optional)</label><input type="text" id="at-url" placeholder="https://... (article, video, or document link)"/></div>
+<div class="fg"><label>Paste Content / Notes</label><textarea id="at-content" rows="4" placeholder="Paste text content, key takeaways, or structured data here..."></textarea></div>
+<div class="fg"><label>Tags (comma-separated)</label><input type="text" id="at-tags" placeholder="e.g. commercial, premium, automotive"/></div>
+${existing.length?`<div style="margin-top:8px;font-size:9px;color:var(--t4)">${existing.length} existing training materials for this agent</div>`:''}
+<div class="btn-row" style="margin-top:12px">
+<button class="btn btn-gold" onclick="saveAgentTraining('${sel}')">Save Training Material</button>
+<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+</div>`);
+}
+
+function saveAgentTraining(agentType){
+  const title=document.getElementById('at-title')?.value.trim();
+  if(!title){toast('Title required','err');return;}
+  const entry={
+    id:gid('ld'),
+    type:'skill',
+    agentType:agentType,
+    title:title,
+    description:document.getElementById('at-desc')?.value.trim()||'',
+    source_url:document.getElementById('at-url')?.value.trim()||null,
+    content:{notes:document.getElementById('at-content')?.value.trim()||''},
+    tags:(document.getElementById('at-tags')?.value||'').split(',').map(t=>t.trim()).filter(Boolean),
+    media_types:[],
+    extracted_style:{},
+    active:true,
+    trainedAt:new Date().toISOString()
+  };
+  DB.saveLDEntry(entry);closeModal();render();
+  toast(`Training material saved for ${agentType.toUpperCase()} agent!`,'ok');
+  auditLog('agent_training','Training material added for '+agentType+': '+title);
+}
 
 // ── L&D File Upload Handlers ──
 
@@ -2687,6 +2924,27 @@ ${(()=>{
 ${b64Assets>0?`<button onclick="persistAllBase64Assets()" class="btn btn-ghost btn-sm" style="font-size:8px">Upload ${b64Assets} to imgbb →</button>`:''}
 </div>`;
 })()}
+<!-- API Provider Status -->
+<div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">🔌 API PROVIDER STATUS</span><span style="font-size:9px;color:var(--cyan);font-weight:700">Failover Active</span></div><div class="card-body">
+<div class="ib ib-blue" style="margin-bottom:10px"><strong>V2 Failover Architecture:</strong> Each API category has a primary and optional fallback provider. If primary fails, the system auto-retries with the fallback. Configure fallback providers in <strong>Integrations</strong>.</div>
+${(()=>{const ps=AIService.getProviderStatus();const cats=[
+  {key:'script',label:'Script / AI Writing',primary:'Anthropic Claude',fallback:'OpenAI GPT-4o',icon:'✍️'},
+  {key:'image',label:'Image Generation',primary:'fal.ai (FLUX)',fallback:'Replicate / DALL-E 3',icon:'🖼'},
+  {key:'video',label:'Video Generation',primary:'fal.ai (Kling/Veo)',fallback:'Runway ML / Luma AI',icon:'🎬'},
+  {key:'audio',label:'Audio / Voiceover',primary:'ElevenLabs',fallback:'OpenAI TTS',icon:'🔊'},
+];return`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">${cats.map(c=>{
+  const s=ps[c.key]||{};const fails=s.fails||0;const col=fails>=3?'var(--red)':fails>=1?'var(--gold)':'var(--green)';
+  const statusLabel=fails>=3?'Degraded':fails>=1?'Intermittent':'Healthy';
+  return`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:8px;padding:10px 12px">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:14px">${c.icon}</span><span style="font-size:10px;font-weight:700;color:var(--t1)">${c.label}</span></div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+<span style="font-size:9px;color:var(--t3)">Primary: ${c.primary}</span>
+<span style="font-size:8px;font-weight:700;color:${col}">● ${statusLabel}</span>
+</div>
+<div style="font-size:8px;color:var(--t4)">Fallback: ${c.fallback}</div>
+${s.last&&s.last!=='—'?`<div style="font-size:8px;color:var(--t4);margin-top:3px">Last used: ${s.last}</div>`:''}
+</div>`;}).join('')}</div>`;})()}
+</div></div>
 ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid var(--gold);border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;line-height:1.7;display:flex;gap:10px;align-items:flex-start"><div style="font-size:16px;flex-shrink:0">⚠</div><div><strong style="color:var(--gold);font-size:11px">Supabase won't work from file:// protocol.</strong><br>You're opening this file directly — browsers block external API calls from local files.<br><strong>Fix:</strong> run <code>python3 -m http.server 8080</code> in your terminal in the same folder, then open <a href="http://localhost:8080/the_studio_v2.html" target="_blank" style="color:var(--blue)">http://localhost:8080/the_studio_v2.html</a> instead. API keys and all other features still work fine from file://.</div></div>`:''}
 
 <div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">🗄 SUPABASE DATABASE</span><span style="font-size:9px;color:${sbStatusColor};font-weight:700">● ${sbStatusLabel}</span></div><div class="card-body">
@@ -3095,14 +3353,26 @@ function creatorDashboard(){
     const dp=DB.getProject(S.creatorDetailPid);
     if(dp)return creatorProjectDetail(dp);
   }
-  const wfOrder=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete','new'];
+  const wfOrder=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered','new'];
   const sorted=[...ps].sort((a,b)=>{
     const ao=wfOrder.indexOf(a.workflowStatus||'new');const bo=wfOrder.indexOf(b.workflowStatus||'new');
     if(ao!==bo)return ao-bo;return new Date(b.updatedAt)-new Date(a.updatedAt);
   });
+  const cap=u?.capacity||5;
+  const activeCount=ps.filter(p=>!['ready_for_delivery','delivered'].includes(p.workflowStatus)).length;
+  const bwPct=Math.min(100,Math.round((activeCount/cap)*100));
+  const bwCol=bwPct>=80?'var(--red)':bwPct>=50?'var(--gold)':'var(--green)';
   return`<div class="page">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
 <div><div class="page-title">My Projects</div><div class="page-sub">${ps.length} assigned · ${attn.length} need action</div></div>
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:10px 14px;min-width:160px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+<span style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700">My Bandwidth</span>
+<span style="font-size:10px;color:${bwCol};font-weight:700">${activeCount}/${cap} active</span>
+</div>
+<div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden">
+<div style="height:100%;width:${bwPct}%;background:${bwCol};border-radius:2px;transition:width .3s"></div>
+</div></div>
 </div>
 ${attn.length?`<div class="ib ib-red"><strong>${attn.length} project(s) need attention</strong> — client brief or feedback waiting.</div>`:''}
 <div style="display:flex;flex-direction:column;gap:9px">
@@ -3132,7 +3402,7 @@ ${cl?`<span style="font-size:9px;color:var(--t3)">· 👤 ${esc(cl.name)}</span>
 </div>
 <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
 ${alert?'<span class="badge badge-red">Action needed</span>':''}
-<span class="badge badge-${wf==='complete'?'green':wf.includes('review')?'gold':'gray'}">${wf.replace(/_/g,' ')}</span>
+<span class="badge badge-${wf==='delivered'?'green':wf==='ready_for_delivery'?'cyan':wf.includes('review')?'gold':'gray'}">${wf.replace(/_/g,' ')}</span>
 ${unread?`<span class="badge badge-blue" style="cursor:pointer" onclick="event.stopPropagation();openStudio('${p.id}');setTimeout(()=>{S.stage=98;render()},50)">💬 ${unread} new</span>`:''}
 </div>
 </div>
@@ -3339,7 +3609,7 @@ function clientProjCard(p){
 ${hasNewSyn?'<span class="badge badge-gold">Synopsis ready ✦</span>':''}
 ${hasSb?'<span class="badge badge-blue">Storyboard ready ✦</span>':''}
 ${needsFb?'<span class="badge badge-red">Feedback needed</span>':''}
-<span class="badge badge-${wf==='complete'?'green':wf.includes('review')?'gold':'gray'}">${wf.replace(/_/g,' ')}</span>
+<span class="badge badge-${wf==='delivered'?'green':wf==='ready_for_delivery'?'cyan':wf.includes('review')?'gold':'gray'}">${wf.replace(/_/g,' ')}</span>
 </div></div>
 <div class="pp-btm">${wfMiniDots(p)}<div style="margin-left:auto;font-size:10px;color:var(--t4)">${p.synopsisRevisionCount||0}/3 revisions used</div></div>
 </div>`;
@@ -3362,7 +3632,7 @@ ${clientProjContent(p,wf)}
 }
 
 function wfBar(p){
-  const steps=[{k:'brief_submitted',l:'Brief'},{k:'synopsis_review',l:'Synopsis'},{k:'synopsis_locked',l:'Approved'},{k:'storyboard_in_progress',l:'Storyboard'},{k:'storyboard_review',l:'Review'},{k:'complete',l:'Complete'}];
+  const steps=[{k:'brief_submitted',l:'Brief'},{k:'synopsis_review',l:'Synopsis'},{k:'synopsis_locked',l:'Approved'},{k:'storyboard_in_progress',l:'Storyboard'},{k:'storyboard_review',l:'Review'},{k:'ready_for_delivery',l:'Delivery'},{k:'delivered',l:'Delivered'}];
   const wf=p.workflowStatus||'new';const order=steps.map(s=>s.k);const ci=order.indexOf(wf);
   return`<div class="wf-bar">${steps.map((s,i)=>`<div class="wf-step ${i<ci?'done':i===ci?'active':''}">
 <span class="wn">${i<ci?'✓':String(i+1)}</span><span class="wl">${s.l}</span></div>`).join('')}</div>`;
@@ -3405,7 +3675,7 @@ ${Object.entries(brief).filter(([,v])=>v).map(([k,v])=>`<div><strong style="colo
   }
 
   // Storyboard
-  if(p.storyboardReleased&&(wf==='storyboard_review'||wf==='complete')){
+  if(p.storyboardReleased&&['storyboard_review','ready_for_delivery','delivered'].includes(wf)){
     const shots=p.shots||[];const sbState=p.sbState||{};
     const readyShots=shots.filter(s=>sbState[s.num]?.img);
     html+=`<div class="section-lbl">Storyboard Preview</div>
@@ -3428,8 +3698,92 @@ ${!readyShots.length?'<div style="color:var(--t4);font-size:10px;padding:12px;gr
 </div></div>`;
   }
 
-  if(wf==='complete')html+=`<div class="ib ib-green" style="margin-top:12px"><strong>Project Complete!</strong> Your production has been finalised. Contact your account manager to receive final deliverables.</div>`;
+  // Delivery section — premium media handover
+  if(['ready_for_delivery','delivered'].includes(wf)){
+    const df=p.deliveryFiles||{};const hasVideo=!!df.video;const hasThumbnail=!!df.thumbnail;const extras=df.extras||[];
+    html+=`<div class="section-lbl" style="margin-top:16px">Your Delivery</div>
+<div class="delivery-showcase">
+${hasVideo?`<div class="delivery-hero">
+<video controls preload="metadata" ${hasThumbnail?`poster="${esc(df.thumbnail)}"`:''}
+  style="width:100%;border-radius:10px;max-height:420px;background:#000">
+<source src="${esc(df.video)}" type="video/mp4"/>Your browser does not support video.
+</video>
+<div class="delivery-hero-actions">
+<a href="${esc(df.video)}" download class="btn btn-gold btn-sm" style="text-decoration:none">↓ Download Video</a>
+</div></div>`:''}
+${hasThumbnail&&!hasVideo?`<div class="delivery-hero"><img src="${esc(df.thumbnail)}" style="width:100%;border-radius:10px;max-height:420px;object-fit:cover"/></div>`:''}
+${extras.length?`<div class="delivery-extras"><div style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700;margin-bottom:8px;letter-spacing:.06em">Additional Files</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px">${extras.map((url,i)=>`<a href="${esc(url)}" download class="btn btn-outline btn-sm" style="text-decoration:none">↓ File ${i+1}</a>`).join('')}</div></div>`:''}
+${p.deliveryNotes?`<div style="background:var(--bg3);border:1px solid var(--b2);border-radius:8px;padding:12px;margin-top:10px"><div style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700;margin-bottom:4px">Delivery Notes</div><div style="font-size:11px;color:var(--t2);line-height:1.6">${esc(p.deliveryNotes)}</div></div>`:''}
+</div>`;
+    if(wf==='ready_for_delivery'){
+      html+=`<div class="delivery-actions" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+<button class="btn btn-green" onclick="clientApproveDelivery()" style="flex:1;justify-content:center;min-width:160px">✓ Approve Delivery</button>
+<div style="flex:2;min-width:200px"><textarea id="del-rev-fb" rows="2" placeholder="Describe what needs to change..." style="width:100%;margin-bottom:6px"></textarea>
+<button class="btn btn-outline btn-sm" onclick="clientRequestDeliveryRevision()" style="width:100%">Request Revision</button></div>
+</div>`;
+    }
+    if(wf==='delivered'){
+      html+=`<div class="ib ib-green" style="margin-top:12px"><strong>Delivery Approved ✓</strong> Your content has been delivered and approved. Thank you for working with CinexAI!</div>`;
+    }
+  }
+
+  // AI PM Messaging — always visible
+  const pmMsgs=p.pmMessages||[];
+  html+=`<div class="section-lbl" style="margin-top:16px">Your AI Project Manager</div>
+<div style="background:var(--bg2);border:1px solid rgba(139,92,246,0.15);border-radius:10px;overflow:hidden">
+<div style="padding:10px 14px;background:rgba(139,92,246,0.05);border-bottom:1px solid rgba(139,92,246,0.1);display:flex;align-items:center;gap:8px">
+<div style="width:28px;height:28px;border-radius:50%;background:var(--grad-ai);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-weight:700">✦</div>
+<div><div style="font-size:11px;font-weight:700;color:var(--purple)">CinexAI Project Manager</div>
+<div style="font-size:8px;color:var(--t4)">Dedicated to ${esc(DB.getUser(p.clientId)?.name||'your brand')} · Powered by AI</div></div>
+<div style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(16,185,129,0.5)"></div>
+</div>
+<div id="pm-msgs" style="max-height:280px;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+${pmMsgs.length?pmMsgs.map(m=>`<div style="display:flex;gap:8px;align-items:flex-start;${m.from==='client'?'flex-direction:row-reverse':''}">
+<div style="width:22px;height:22px;border-radius:50%;background:${m.from==='client'?'var(--gold)':'var(--grad-ai)'};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;font-weight:700;flex-shrink:0">${m.from==='client'?'You':'✦'}</div>
+<div style="max-width:75%;padding:8px 11px;border-radius:${m.from==='client'?'10px 10px 2px 10px':'10px 10px 10px 2px'};background:${m.from==='client'?'rgba(255,107,53,0.08)':'rgba(139,92,246,0.08)'};border:1px solid ${m.from==='client'?'rgba(255,107,53,0.12)':'rgba(139,92,246,0.1)'}">
+<div style="font-size:10px;color:var(--t2);line-height:1.6">${esc(m.text)}</div>
+<div style="font-size:7px;color:var(--t4);margin-top:3px;text-align:${m.from==='client'?'right':'left'}">${m.ts?new Date(m.ts).toLocaleString():''}</div>
+</div></div>`).join(''):`<div style="text-align:center;padding:16px;color:var(--t4);font-size:10px">Ask your AI Project Manager anything about this project — status updates, creative questions, or change requests.</div>`}
+</div>
+<div style="padding:8px 14px;border-top:1px solid rgba(139,92,246,0.1);display:flex;gap:6px">
+<input type="text" id="pm-msg-input" placeholder="Message your PM..." style="flex:1;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px 10px;border-radius:6px;font-size:11px" onkeydown="if(event.key==='Enter')sendPMMessage()"/>
+<button class="btn btn-purple btn-sm" onclick="sendPMMessage()" style="flex-shrink:0">Send</button>
+</div></div>`;
+
   return html;
+}
+
+async function sendPMMessage(){
+  const input=document.getElementById('pm-msg-input');
+  const msg=input?.value.trim();if(!msg)return;
+  const p=DB.getProject(S.pid);if(!p)return;
+  if(!p.pmMessages)p.pmMessages=[];
+  p.pmMessages.push({from:'client',text:msg,ts:new Date().toISOString()});
+  input.value='';
+  DB.saveProject(p);render();
+  // AI PM responds with brand context
+  const brandCtx=p.clientId?buildPMContext(p.clientId):'';
+  const mt=MT[p.type];
+  const wf=p.workflowStatus||'new';
+  const history=p.pmMessages.slice(-6).map(m=>`${m.from==='client'?'Client':'PM'}: ${m.text}`).join('\n');
+  try{
+    const resp=await callClaude(
+      `You are the dedicated AI Project Manager for ${DB.getUser(p.clientId)?.name||'this client'} at CinexAI. You are warm, professional, and knowledgeable about their brand. Keep responses concise (2-3 sentences max). You know the project status and can provide updates.${brandCtx?'\n\nBRAND KNOWLEDGE:\n'+brandCtx:''}`,
+      `PROJECT: ${p.name} (${mt?.label})\nSTATUS: ${wf.replace(/_/g,' ')}\n\nCONVERSATION:\n${history}\n\nRespond to the client's latest message naturally. Be helpful and specific.`,
+      200
+    );
+    const p2=DB.getProject(S.pid);
+    if(!p2.pmMessages)p2.pmMessages=[];
+    p2.pmMessages.push({from:'pm',text:resp,ts:new Date().toISOString()});
+    DB.saveProject(p2);render();
+    // Scroll to bottom
+    setTimeout(()=>{const el=document.getElementById('pm-msgs');if(el)el.scrollTop=el.scrollHeight;},100);
+  }catch(e){
+    const p2=DB.getProject(S.pid);
+    p2.pmMessages.push({from:'pm',text:'I\'m temporarily unavailable. Your message has been saved and the team will follow up shortly.',ts:new Date().toISOString()});
+    DB.saveProject(p2);render();
+  }
 }
 
 async function submitSynopsisFeedback(){
@@ -3521,7 +3875,7 @@ ${q.hint?`<div style="font-size:10px;color:var(--t4);margin-bottom:14px;line-hei
 ${q.t==='select'?`<select id="bans" style="width:100%;max-width:380px;font-size:13px;padding:10px 12px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px">${(q.opts||[]).map(o=>`<option${(S.bAnswers||{})[q.id]===o?' selected':''}>${o}</option>`).join('')}</select>`:
 q.t==='textarea'?`<textarea id="bans" rows="4" style="width:100%;font-size:12px;padding:10px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px;font-family:Arial,sans-serif;resize:vertical" placeholder="${q.hint||''}">${esc((S.bAnswers||{})[q.id]||'')}</textarea>`:
 `<input type="text" id="bans" value="${esc((S.bAnswers||{})[q.id]||'')}" placeholder="${q.hint||q.q}" style="width:100%;max-width:480px;font-size:13px;padding:10px 12px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px" onkeydown="if(event.key==='Enter')advanceBrief()"/>`}
-<!-- AI Assistant panel -->
+${q.t!=='select'?`<!-- AI Assistant panel — only for open-ended questions -->
 <div id="ai-help-panel" style="display:none;margin-top:14px;background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:8px;padding:13px">
 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
 <span style="font-size:12px">✦</span><span style="font-size:10px;font-weight:700;color:var(--gold)">Claude Assistant</span>
@@ -3532,10 +3886,10 @@ q.t==='textarea'?`<textarea id="bans" rows="4" style="width:100%;font-size:12px;
 <div class="btn-row" style="margin-top:8px">
 <button class="btn btn-outline btn-sm" onclick="briefAiUseSuggestion()">Use this answer →</button>
 </div>
-</div>
+</div>`:''}
 <div class="btn-row" style="margin-top:18px">
 <button class="btn btn-gold" onclick="advanceBrief()">Continue →</button>
-<button class="btn btn-outline btn-sm" onclick="briefAiHelp()" id="ai-help-btn">✦ I need help</button>
+${q.t!=='select'?`<button class="btn btn-outline btn-sm" onclick="briefAiHelp()" id="ai-help-btn">✦ I need help</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="if(!S.bAnswers)S.bAnswers={};S.bAnswers['${q.id}']='';S.bStep++;render()">Skip</button>
 </div></div>`;
 }
@@ -3583,6 +3937,41 @@ function briefAiUseSuggestion(){
   if(el)el.value=S.briefAiSuggestion;
   document.getElementById('ai-help-panel').style.display='none';
   toast('Answer filled in — review and click Continue','ok');
+}
+
+// Studio brief AI help — for individual fields in the grid brief form
+async function studioBriefAiHelp(fieldId,question,hint,btn){
+  const panel=document.getElementById('bai-'+fieldId);
+  if(!panel)return;
+  // Toggle off if already open
+  if(panel.style.display==='block'){panel.style.display='none';return;}
+  // Close any other open panels
+  document.querySelectorAll('.brief-ai-panel').forEach(p=>p.style.display='none');
+  panel.style.display='block';
+  panel.innerHTML=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:11px">✦</span><span style="font-size:9px;font-weight:700;color:var(--gold)">AI Assistant</span><button onclick="this.closest('.brief-ai-panel').style.display='none'" style="background:none;border:none;color:var(--t4);cursor:pointer;margin-left:auto;font-size:12px">✕</button></div><div style="font-size:10px;color:var(--t4)">Thinking…</div>`;
+  btn.disabled=true;
+  const p=DB.getProject(S.pid);const mt=MT[p?.type];
+  const currentVal=document.querySelector('[data-bf="'+fieldId+'"]')?.value?.trim()||'';
+  // Gather other filled brief fields for context
+  const otherFields=[];
+  document.querySelectorAll('[data-bf]').forEach(el=>{const v=el.value?.trim();if(v&&el.dataset.bf!==fieldId)otherFields.push(el.dataset.bf+': '+v);});
+  try{
+    const resp=await callClaude(
+      'You are a friendly creative project assistant helping fill out a production brief for '+( mt?.label||'a media project')+'. Be warm, specific, and concise. Under 80 words.',
+      `Question: "${question}"${hint?'\nHint: '+hint:''}\n${otherFields.length?'Other answers so far:\n'+otherFields.join('\n'):''}${currentVal?'\nCurrent answer: "'+currentVal+'"':''}\n\n${currentVal?'Help improve or expand this answer.':'Suggest a good answer for this field based on the project context.'}\n\nEnd with: "Suggested: [your specific suggestion]"`,
+      300
+    );
+    const parts=resp.split('Suggested:');
+    const explanation=parts[0].trim();
+    const suggestion=(parts[1]||'').trim();
+    panel.innerHTML=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:11px">✦</span><span style="font-size:9px;font-weight:700;color:var(--gold)">AI Assistant</span><button onclick="this.closest('.brief-ai-panel').style.display='none'" style="background:none;border:none;color:var(--t4);cursor:pointer;margin-left:auto;font-size:12px">✕</button></div>
+<div style="font-size:10px;color:var(--t2);line-height:1.6;margin-bottom:6px">${esc(explanation).replace(/\n/g,'<br>')}</div>
+${suggestion?`<div style="background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);border-radius:5px;padding:6px 8px;margin-bottom:6px"><div style="font-size:8px;color:var(--t4);margin-bottom:2px">SUGGESTED</div><div style="font-size:10px;color:var(--gold);line-height:1.5">${esc(suggestion)}</div></div>
+<button class="btn btn-outline btn-sm" onclick="document.querySelector('[data-bf=\\'${fieldId}\\']').value='${esc(suggestion).replace(/'/g,"\\'")}';this.closest('.brief-ai-panel').style.display='none';toast('Answer filled','ok')">Use this →</button>`:''}`;
+  }catch(e){
+    panel.innerHTML=`<div style="font-size:10px;color:var(--t4);padding:4px">AI not available — check API key in Settings.</div>`;
+  }
+  btn.disabled=false;
 }
 function mtDesc(k){const m={commercial_ad:'TV, digital, or social ad',short_film:'5–30 minute narrative film',youtube_explainer:'Educational YouTube video',podcast:'Audio podcast episode',product_video:'Product demo or launch video',testimonial:'Customer success story',influencer_ugc:'Social media creator content',music_video:'Lyric-synced visual video',design:'Posters, thumbnails, carousels, billboards & more — created in Canva'};return m[k]||''}
 let _briefRefs=[];
@@ -3707,7 +4096,7 @@ function doRegister(role){
   const username=document.getElementById('ru')?.value.trim()||name.toLowerCase().replace(/\s+/g,'.');
   const ic=role==='client';
   const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString()};
-  if(ic)u.clientId=gcid();else u.username=username;
+  if(ic){u.clientId=gcid();u.brandFolder={guidelines:'',tone:'',positioning:'',audience:'',competitors:'',vocabulary:'',banned:'',products:''};}else u.username=username;
   DB.saveUser(u);closeModal();render();
   toast(`${ic?'Client':'Creator'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
@@ -3720,9 +4109,10 @@ function showEditUserModal(uid){
 <div class="fg"><label>Email</label><input type="text" id="eu-e" value="${esc(u.email||'')}"/></div>
 <div class="fg"><label>Password</label><input type="password" id="eu-p" value="${esc(u.password||'')}"/></div>
 ${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <strong style="color:var(--purple)">${u.clientId}</strong></div>`:''}
+${u.role==='creator'?`<div class="fg"><label>Max Active Projects (Capacity)</label><input type="number" id="eu-cap" min="1" max="20" value="${u.capacity||5}"/></div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
-function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
+function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;const capEl=document.getElementById('eu-cap');if(capEl)u.capacity=Math.max(1,Math.min(20,parseInt(capEl.value)||5));DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
 function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);auditLog('user_status_changed',u.active?'Activated':'Deactivated',uid);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
 
 function showAssignClientsModal(empId){
@@ -3817,8 +4207,8 @@ function doNewProject(){
   // Open detail view instead of jumping straight to Studio
   S.tab='projects';S.detailPid=p.id;render();
   pushToRole('admin','project','New project created',p.name+' ('+p.projectId+')',p.id);
-  if(empId)pushNotif(empId,'project','New project assigned',p.name+' assigned to you',p.id);
-  if(clientId)pushNotif(clientId,'project','Project started',p.name+' has been set up for you',p.id);
+  if(empId){pushNotif(empId,'project','New project assigned',p.name+' assigned to you',p.id);emailForProject('new_assignment',p.id);}
+  if(clientId){pushNotif(clientId,'project','Project started',p.name+' has been set up for you',p.id);emailForProject('project_started',p.id);}
 }
 
 function viewClientBriefs(cid){
@@ -3845,11 +4235,188 @@ ${!assets.length?'<div style="color:var(--t4);font-size:10px;padding:12px;grid-c
 </div><div class="btn-row" style="margin-top:10px"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>`);
 }
 
+// ══════════════════════════════════════
+// AI PROJECT MANAGER — BRAND FOLDER & PM SYSTEM (V2)
+// ══════════════════════════════════════
+function showBrandFolderModal(cid){
+  const c=DB.getUser(cid);if(!c)return;
+  const bf=c.brandFolder||{};
+  openModal(`<div class="modal-title" style="display:flex;align-items:center;gap:8px">
+<span style="font-size:11px;background:var(--grad-ai);-webkit-background-clip:text;-webkit-text-fill-color:transparent">✦</span>
+Brand Folder — ${esc(c.name)}
+<span class="badge badge-purple" style="margin-left:auto">AI PM Knowledge Base</span></div>
+<div class="ib ib-blue" style="margin-bottom:12px"><strong>This is your AI Project Manager's brain for ${esc(c.name)}.</strong> The more detail you provide, the smarter the PM becomes at making creative decisions for this brand.</div>
+<div class="form2" style="gap:10px">
+<div class="fg" style="grid-column:1/-1"><label>Brand Guidelines</label><textarea id="bf-guidelines" rows="3" placeholder="Logo usage rules, colour palette, typography, brand voice rules...">${esc(bf.guidelines||'')}</textarea></div>
+<div class="fg"><label>Tone of Voice</label><textarea id="bf-tone" rows="2" placeholder="e.g. Premium, aspirational, warm but not casual. Speaks like a trusted friend who is also an expert.">${esc(bf.tone||'')}</textarea></div>
+<div class="fg"><label>Market Positioning</label><textarea id="bf-positioning" rows="2" placeholder="e.g. Premium segment, positioned as the thinking person's luxury brand. Competes with Audi and Lexus.">${esc(bf.positioning||'')}</textarea></div>
+<div class="fg"><label>Target Audience</label><textarea id="bf-audience" rows="2" placeholder="e.g. Urban professionals 28-45, household income 20L+, tech-savvy, value quality over flash.">${esc(bf.audience||'')}</textarea></div>
+<div class="fg"><label>Competitors</label><textarea id="bf-competitors" rows="2" placeholder="e.g. Audi India, Mercedes India, Lexus. Links to their campaigns welcome.">${esc(bf.competitors||'')}</textarea></div>
+<div class="fg"><label>Products / Services</label><textarea id="bf-products" rows="2" placeholder="e.g. 3 Series, 5 Series, X1 SUV, BMW Financial Services, BMW Lifestyle accessories">${esc(bf.products||'')}</textarea></div>
+<div class="fg"><label>Approved Vocabulary</label><textarea id="bf-vocabulary" rows="2" placeholder="Words and phrases to use: Sheer Driving Pleasure, Ultimate Driving Machine, Performance...">${esc(bf.vocabulary||'')}</textarea></div>
+<div class="fg"><label>Banned Words / Topics</label><textarea id="bf-banned" rows="2" placeholder="Never say: cheap, affordable, budget. Avoid: direct competitor naming, political topics.">${esc(bf.banned||'')}</textarea></div>
+</div>
+<div class="btn-row" style="margin-top:12px">
+<button class="btn btn-gold" onclick="saveBrandFolder('${cid}')">Save Brand Folder</button>
+<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+</div>`);
+}
+
+function saveBrandFolder(cid){
+  const c=DB.getUser(cid);if(!c)return;
+  c.brandFolder={
+    guidelines:document.getElementById('bf-guidelines')?.value.trim()||'',
+    tone:document.getElementById('bf-tone')?.value.trim()||'',
+    positioning:document.getElementById('bf-positioning')?.value.trim()||'',
+    audience:document.getElementById('bf-audience')?.value.trim()||'',
+    competitors:document.getElementById('bf-competitors')?.value.trim()||'',
+    products:document.getElementById('bf-products')?.value.trim()||'',
+    vocabulary:document.getElementById('bf-vocabulary')?.value.trim()||'',
+    banned:document.getElementById('bf-banned')?.value.trim()||'',
+    updatedAt:new Date().toISOString()
+  };
+  DB.saveUser(c);closeModal();render();
+  toast('Brand folder saved — AI PM updated!','ok');
+  auditLog('brand_folder_updated','Brand folder updated for '+c.name,cid);
+}
+
+// Build AI PM system context from brand folder
+function buildPMContext(clientId){
+  const c=DB.getUser(clientId);if(!c)return '';
+  const bf=c.brandFolder||{};
+  const assets=c.brandAssets||[];
+  let ctx=`BRAND: ${c.name}\n`;
+  if(bf.guidelines)ctx+=`BRAND GUIDELINES: ${bf.guidelines}\n`;
+  if(bf.tone)ctx+=`TONE OF VOICE: ${bf.tone}\n`;
+  if(bf.positioning)ctx+=`MARKET POSITIONING: ${bf.positioning}\n`;
+  if(bf.audience)ctx+=`TARGET AUDIENCE: ${bf.audience}\n`;
+  if(bf.competitors)ctx+=`COMPETITORS: ${bf.competitors}\n`;
+  if(bf.products)ctx+=`PRODUCTS/SERVICES: ${bf.products}\n`;
+  if(bf.vocabulary)ctx+=`APPROVED VOCABULARY: ${bf.vocabulary}\n`;
+  if(bf.banned)ctx+=`BANNED WORDS/TOPICS: ${bf.banned}\n`;
+  if(assets.length)ctx+=`BRAND ASSETS: ${assets.length} files uploaded (${assets.map(a=>a.assetType+': '+a.name).join(', ')})\n`;
+  return ctx;
+}
+
+// AI PM: Recommend best creator for a project
+async function pmRecommendCreator(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  const creators=DB.getUsers().filter(u=>u.role==='creator'&&u.active!==false);
+  if(!creators.length){toast('No active creators available','err');return;}
+  const ps=DB.getProjects();
+  const brandCtx=p.clientId?buildPMContext(p.clientId):'';
+  const mt=MT[p.type];
+  const creatorProfiles=creators.map(c=>{
+    const cap=c.capacity||5;
+    const active=ps.filter(pr=>pr.assignedCreatorId===c.id&&!['ready_for_delivery','delivered'].includes(pr.workflowStatus)).length;
+    const completed=ps.filter(pr=>pr.assignedCreatorId===c.id&&['ready_for_delivery','delivered'].includes(pr.workflowStatus)).length;
+    const specialities=[...new Set(ps.filter(pr=>pr.assignedCreatorId===c.id).map(pr=>pr.type).filter(Boolean))];
+    const hasClientExp=ps.some(pr=>pr.assignedCreatorId===c.id&&pr.clientId===p.clientId);
+    return`- ${c.name} (ID:${c.id}): ${active}/${cap} active, ${completed} completed, specialities: ${specialities.map(s=>MT[s]?.label||s).join(',')||'none'}, has worked with this client before: ${hasClientExp?'YES':'no'}`;
+  }).join('\n');
+
+  toast('AI PM analysing team bandwidth...','info');
+  try{
+    const resp=await callClaude(
+      'You are an AI Project Manager for CinexAI, a media production platform. You are selecting the best creator for a project. Consider: 1) Available bandwidth (lower active count = more available), 2) Speciality match with project type, 3) Prior experience with this client, 4) Overall completed projects (experience level). Be decisive — recommend ONE creator.',
+      `PROJECT: ${p.name}\nTYPE: ${mt?.label||p.type}\n${brandCtx?'CLIENT CONTEXT:\n'+brandCtx+'\n':''}AVAILABLE CREATORS:\n${creatorProfiles}\n\nRecommend the best creator. Reply in this exact format:\nRECOMMENDED: [creator name]\nREASON: [1-2 sentence explanation]`,
+      200
+    );
+    const recMatch=resp.match(/RECOMMENDED:\s*(.+)/i);
+    const reasonMatch=resp.match(/REASON:\s*(.+)/i);
+    const recName=recMatch?recMatch[1].trim():'';
+    const reason=reasonMatch?reasonMatch[1].trim():resp;
+    const matched=creators.find(c=>recName.toLowerCase().includes(c.name.toLowerCase()));
+
+    openModal(`<div class="modal-title"><span style="background:var(--grad-ai);-webkit-background-clip:text;-webkit-text-fill-color:transparent">✦</span> AI PM Recommendation</div>
+<div style="background:#0e0a18;border:1px solid rgba(139,92,246,0.2);border-radius:8px;padding:14px;margin-bottom:12px">
+<div style="font-size:12px;font-weight:700;color:var(--purple);margin-bottom:6px">Recommended: ${esc(recName||'See analysis')}</div>
+<div style="font-size:11px;color:var(--t2);line-height:1.6">${esc(reason)}</div>
+</div>
+${matched?`<div class="btn-row"><button class="btn btn-gold" onclick="assignCreatorFromPM('${pid}','${matched.id}');closeModal()">Assign ${esc(matched.name)} →</button><button class="btn btn-ghost" onclick="closeModal()">Decide Later</button></div>`:`<div class="btn-row"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>`}`);
+  }catch(e){
+    toast('AI PM not available — check API key','err');
+  }
+}
+
+function assignCreatorFromPM(pid,creatorId){
+  const p=DB.getProject(pid);if(!p)return;
+  const c=DB.getUser(creatorId);
+  p.assignedCreatorId=creatorId;
+  DB.saveProject(p);render();
+  toast(`Assigned to ${c?.name||'creator'}!`,'ok');
+  pushNotif(creatorId,'project','New project assigned',p.name+' assigned to you by AI PM',pid);
+}
+
+// AI PM: Generate project analysis with brand context
+async function pmProjectAnalysis(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  const mt=MT[p.type];
+  const brandCtx=p.clientId?buildPMContext(p.clientId):'';
+  const brief={...p.clientBrief,...p.brief};
+  const briefStr=Object.entries(brief).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join('\n');
+
+  toast('AI PM analysing project...','info');
+  try{
+    const resp=await callClaude(
+      `You are the AI Project Manager for CinexAI. You know this brand deeply and manage its projects with strategic intelligence. Provide a concise production analysis.${brandCtx?'\n\nBRAND KNOWLEDGE:\n'+brandCtx:''}`,
+      `PROJECT: ${p.name}\nTYPE: ${mt?.label}\nBRIEF:\n${briefStr}\n\nProvide:\n1. CREATIVE DIRECTION (2-3 sentences — the overall vision)\n2. RECOMMENDED WRITER STYLE (which writing personality fits)\n3. RECOMMENDED IMAGE MODEL (which fal.ai model fits the visual needs)\n4. KEY RISKS (anything to watch for)\n5. ESTIMATED COMPLEXITY (Low/Medium/High)`,
+      500
+    );
+    openModal(`<div class="modal-title"><span style="background:var(--grad-ai);-webkit-background-clip:text;-webkit-text-fill-color:transparent">✦</span> AI PM — Project Analysis</div>
+<div style="background:#0e0a18;border:1px solid rgba(139,92,246,0.2);border-radius:8px;padding:14px;font-size:11px;color:var(--t2);line-height:1.8;white-space:pre-wrap">${esc(resp)}</div>
+<div class="btn-row" style="margin-top:10px"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>`);
+  }catch(e){toast('AI PM not available — check API key','err');}
+}
+
+// Brand folder completeness indicator
+function brandFolderScore(clientId){
+  const c=DB.getUser(clientId);if(!c)return 0;
+  const bf=c.brandFolder||{};
+  const fields=['guidelines','tone','positioning','audience','competitors','products','vocabulary','banned'];
+  return Math.round(fields.filter(f=>bf[f]&&bf[f].trim().length>5).length/fields.length*100);
+}
+
 function openModal(html){document.getElementById('modal-root').innerHTML=`<div class="modal-wrap" onclick="if(event.target===this)closeModal()"><div class="modal-box"><button class="modal-close" onclick="closeModal()">✕</button>${html}</div></div>`;}
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
-function viewAsClient(cid){const og=S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
+// ══════════════════════════════════════
+// ADMIN IMPERSONATION
+// ══════════════════════════════════════
+function adminImpersonationBar(){
+  if(!S.session?._og)return '';
+  const ogUser=DB.getUser(S.session._og);
+  const viewingAs=S.session.name||'Unknown';
+  const roleLabel=S.session.role==='client'?'Client':'Creator';
+  return`<div class="admin-impersonation-bar">
+<div class="admin-imp-left">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+  <span>Admin <strong>${esc(ogUser?.name||'Admin')}</strong> viewing as ${roleLabel}: <strong>${esc(viewingAs)}</strong></span>
+</div>
+<button class="btn-return-admin" onclick="returnToAdmin()">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+  Return to Admin
+</button>
+</div>`;
+}
+
+function returnToAdmin(){
+  if(!S.session?._og)return;
+  const ogId=S.session._og;
+  const ogUser=DB.getUser(ogId);
+  if(!ogUser){toast('Original admin session not found. Please sign in again.','err');doLogout();return;}
+  auditLog('admin_return','Admin returned from impersonation');
+  S.session={userId:ogId,role:'admin',name:ogUser.name,_og:null};
+  DB.setSession(S.session);
+  S.view='admin';S.tab='dashboard';S.pid=null;
+  render();
+  toast('Returned to admin dashboard.','ok');
+}
+
+function viewAsClient(cid){const og=S.session._og||S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Use the bar above to return to admin.','info');}
+
+function viewAsCreator(eid){const og=S.session._og||S.session.userId;auditLog('admin_impersonation','Admin viewing as creator',eid);S.session={...S.session,_og:og,userId:eid,role:'creator',name:DB.getUser(eid)?.name||'Creator'};S.view='creator';S.tab='dashboard';render();toast('Viewing as creator. Use the bar above to return to admin.','info');}
 
 // ══════════════════════════════════════
 // STUDIO
@@ -3886,7 +4453,7 @@ ${p.projectId?`<span style="font-size:9px;font-weight:700;color:var(--gold);font
 </div>
 ${cl?`<span class="badge badge-purple">${esc(cl.clientId||'')}</span><span style="font-size:10px;color:var(--t3)">${esc(cl.name)}</span>`:''}
 <select id="ph-wf" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px" onchange="saveInputs()">
-${['new','brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].map(s=>`<option value="${s}"${p.workflowStatus===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
+${['new','brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].map(s=>`<option value="${s}"${p.workflowStatus===s?' selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
 </select>
 <div style="display:flex;align-items:center;gap:4px">
 <span style="font-size:8px;color:var(--t4);text-transform:uppercase">Deadline</span>
@@ -3971,7 +4538,9 @@ ${(mt?.clientQs||[]).map(q=>`<div class="fg"><label>${q.q}</label>${
 q.t==='select'?`<select data-bf="${q.id}">${(q.opts||[]).map(o=>`<option${(b[q.id]===o)?' selected':''}>${o}</option>`).join('')}</select>`:
 q.t==='textarea'?`<textarea data-bf="${q.id}" rows="3">${esc(b[q.id]||'')}</textarea>`:
 `<input type="text" data-bf="${q.id}" value="${esc(b[q.id]||'')}" placeholder="${q.hint||''}"/>`
-}</div>`).join('')}
+}${q.t!=='select'&&!b[q.id]?`<button class="btn-brief-ai-help" onclick="studioBriefAiHelp('${q.id}','${esc(q.q)}','${esc(q.hint||'')}',this)" title="Get AI suggestion for this field">✦ I need help</button>
+<div class="brief-ai-panel" id="bai-${q.id}" style="display:none"></div>`:''}
+</div>`).join('')}
 </div>
 <div class="btn-row">
 <button class="btn btn-gold" onclick="genSynopsis()">✦ Generate Synopsis</button>
@@ -4051,10 +4620,15 @@ async function genSynopsis(){
   const writerSys=writer.sys||'You are a creative director at a top media production agency. Write compelling creative synopses in vivid story format. No technical jargon.';
   // Merge L&D skill training if writer has trained skills
   const ldSkills=DB.getLDEntries().filter(e=>e.type==='skill'&&e.active&&(e.tags||[]).some(t=>t.includes(writer.id)||t.includes('writer')));
+  const writerTraining=DB.getLDEntries().filter(e=>e.agentType==='writer'&&e.active!==false);
   const skillContext=ldSkills.length?'\n\nTRAINED SKILLS:\n'+ldSkills.map(s=>s.title+': '+(s.description||'')).join('\n'):'';
+  const writerTrainingCtx=writerTraining.length?'\n\nWRITER TRAINING MATERIALS:\n'+writerTraining.slice(0,5).map(t=>t.title+': '+(t.description||'')+(t.content?.notes?' — '+t.content.notes.substring(0,200):'')).join('\n'):'';
+  // AI PM: Inject brand folder context if available
+  const brandCtx=p.clientId?buildPMContext(p.clientId):'';
+  const pmContext=brandCtx?'\n\nAI PROJECT MANAGER — BRAND KNOWLEDGE:\n'+brandCtx+'\nIMPORTANT: Your creative must align with this brand\'s tone, vocabulary, and positioning. Avoid banned words/topics.':'';
   try{
     const r=await callClaude(
-      writerSys+' Write creative synopses for clients. Use vivid story format. Make the client excited to greenlight this.'+skillContext,
+      writerSys+' Write creative synopses for clients. Use vivid story format. Make the client excited to greenlight this.'+skillContext+writerTrainingCtx+pmContext,
       p.type==='commercial_ad'
         ?`Write a creative synopsis for this Commercial Ad.\n\nCLIENT BRIEF:\n${brief}\n\nStructure as 4 vivid paragraphs:\n1. OPENING (0-3 sec): What does the viewer see and feel immediately?\n2. STORY ARC: How does the story unfold? What is the emotional journey?\n3. PRODUCT HERO MOMENT: How and when does the product/brand appear?\n4. CLOSING: The tagline, CTA, final image, and the feeling left with the viewer.\n\nWrite like a mini-film pitch. End with one sentence on the emotional impact.\n\nReturn ONLY the synopsis text.`
         :`Write a creative synopsis for this ${MT[p.type]?.label} project.\n\nBRIEF:\n${brief}\n\nWrite 2-3 engaging narrative paragraphs: the creative concept, story/structure, mood, visual direction, and the emotion the audience will feel. Make it exciting. End with the intended impact.\n\nReturn ONLY the synopsis text.`,
@@ -4065,6 +4639,7 @@ async function genSynopsis(){
     if(p2.workflowStatus!=='synopsis_review'){if(!p2.stageHistory)p2.stageHistory=[];p2.stageHistory.push({stage:'synopsis_review',enteredAt:new Date().toISOString()});}p2.workflowStatus='synopsis_review';p2.newBrief=false;DB.saveProject(p2);
     if(S.stage===1&&S.step!==2){S.step=2;}render();toast('Synopsis ready!','ok');
     if(p2.clientId)pushNotif(p2.clientId,'synopsis','Synopsis ready for review!',p2.name+' — your creative synopsis is ready. Please review and approve.',p2.id);
+    emailForProject('synopsis_ready',p2.id);
   }catch(e){toast(e.message,'err');}
   document.getElementById('syn-load')?.classList.remove('show');
 }
@@ -4675,6 +5250,26 @@ ${IMG_TONES.map(t=>`<option value="${t}" ${S.imgTone===t?'selected':''}>${t}</op
 </div>
 <div style="font-size:8px;color:var(--t4);margin-top:6px">Using: <strong style="color:var(--gold)">${IMG_MODELS.find(m=>m.id===S.imgModel)?.n||'FLUX 1.1 Ultra'}</strong> · ${S.imgAspect} · ${S.imgQuality} quality · ${S.imgTone} tone</div>
 </div>
+<!-- ComfyUI Workflow Library (V2) -->
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:7px;padding:9px 12px;margin-bottom:10px">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+<span style="font-size:9px;font-weight:700;color:var(--purple);text-transform:uppercase">Workflow Pipeline</span>
+<span class="badge badge-purple" style="font-size:7px">Phase 3</span>
+</div>
+<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px">
+${WORKFLOW_LIBRARY.filter(w=>w.useCase.includes(p.type)||w.id==='standard_flux').map(w=>{
+  const isSel=(S.selectedWorkflow||'standard_flux')===w.id;
+  return`<div onclick="S.selectedWorkflow='${w.id}';render()" style="flex-shrink:0;min-width:150px;background:${isSel?'rgba(139,92,246,0.08)':'var(--bg3)'};border:1px solid ${isSel?'var(--purple)':'var(--b1)'};border-radius:6px;padding:8px 10px;cursor:pointer;transition:all .15s">
+<div style="font-size:10px;font-weight:700;color:${isSel?'var(--purple)':'var(--t2)'};margin-bottom:2px">${w.name}</div>
+<div style="font-size:8px;color:var(--t4);line-height:1.4;margin-bottom:4px">${w.desc.substring(0,60)}${w.desc.length>60?'…':''}</div>
+<div style="display:flex;gap:4px;flex-wrap:wrap">
+<span style="font-size:7px;background:var(--bg4);color:var(--t4);padding:1px 5px;border-radius:3px">${w.costEst}</span>
+<span style="font-size:7px;background:var(--bg4);color:var(--t4);padding:1px 5px;border-radius:3px">Q:${w.quality}/10</span>
+<span style="font-size:7px;background:var(--bg4);color:var(--t4);padding:1px 5px;border-radius:3px">${w.complexity}</span>
+</div></div>`;}).join('')}
+</div>
+${(()=>{const w=WORKFLOW_LIBRARY.find(x=>x.id===(S.selectedWorkflow||'standard_flux'));return w?`<div style="margin-top:6px;font-size:8px;color:var(--t4)">Pipeline: ${w.steps.join(' → ')}</div>`:''})()}
+</div>
 ${trendingStylesPanel(p)}
 <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
 <button class="btn btn-gold" onclick="genAllRefs()" id="btn-gen-refs">✦ Generate All Pending</button>
@@ -5037,6 +5632,7 @@ ${shotPrompt?`<div style="padding:3px 6px;max-height:32px;overflow:hidden"><div 
 <div style="padding:3px 6px"><input type="text" placeholder="Add comment for regeneration…" value="${esc(shotComment)}" onchange="saveSbComment('${s.num}',this.value)" style="width:100%;background:var(--bg4);border:1px solid var(--b1);color:var(--t2);font-size:8px;padding:3px 6px;border-radius:3px;box-sizing:border-box"/></div>
 <div class="sb-btns">
 <button onclick="singleSb('${s.num}')" title="${shotComment?'Will use your comment in regeneration':'Regenerate'}">⟳${shotComment?' 💬':''}</button>
+<button onclick="showVersionHistory('${s.num}')" title="Version history">${(p?.versionHistory||{})[s.num]?.length?`⏱${(p.versionHistory[s.num]).length}`:'⏱'}</button>
 <button onclick="openImgModal('S${s.num}',S.sbState['${s.num}']?.img,'${esc(shotPrompt)}')" ${sd.img?'':'disabled'}>View</button>
 <button onclick="dlImg(S.sbState['${s.num}']?.img,'S${s.num}_hires.jpg')" ${sd.img?'':'disabled'} title="Download full res">↓ HiRes</button>
 </div>
@@ -5073,7 +5669,73 @@ async function genAllSb(){
   document.getElementById('btn-sb').disabled=false;if(!S.stopSb)toast('Storyboard done!','ok');
 }
 async function resumeSb(){S.stopSb=false;S._consecutiveErrors=0;const p=DB.getProject(S.pid);if(!p)return;for(const s of p.shots){if(S.stopSb)break;const st=S.sbState[s.num]?.status;if(!st||st==='idle'||st==='error'){await runSbShot(p,s);if(S.sbState[s.num]?.status==='error'){S._consecutiveErrors=(S._consecutiveErrors||0)+1;if(S._consecutiveErrors>=3){S.stopSb=true;toast('Auto-stopped: 3 consecutive errors','err');break;}}else{S._consecutiveErrors=0;}}}}
-async function singleSb(num){S.stopSb=false;const p=DB.getProject(S.pid);if(!p)return;S.sbState[num]={status:'idle',img:null};const s=p.shots.find(x=>x.num===num);if(!s)return;await runSbShot(p,s);}
+async function singleSb(num){
+  S.stopSb=false;const p=DB.getProject(S.pid);if(!p)return;
+  // V2: Save current version to history before regenerating
+  const currentImg=S.sbState[num]?.img;
+  if(currentImg){
+    if(!p.versionHistory)p.versionHistory={};
+    if(!p.versionHistory[num])p.versionHistory[num]=[];
+    p.versionHistory[num].push({img:currentImg,prompt:S.sbState[num]?.prompt||'',ts:new Date().toISOString(),comment:(p.sbComments||{})[num]||''});
+    if(p.versionHistory[num].length>10)p.versionHistory[num]=p.versionHistory[num].slice(-10);
+    DB.saveProject(p);
+  }
+  S.sbState[num]={status:'idle',img:null};const s=p.shots.find(x=>x.num===num);if(!s)return;await runSbShot(p,s);
+}
+
+// V2: Version History Viewer
+function showVersionHistory(num){
+  const p=DB.getProject(S.pid);if(!p)return;
+  const versions=(p.versionHistory||{})[num]||[];
+  const current=S.sbState[num]?.img;
+  if(!versions.length&&!current){toast('No versions yet — generate this shot first','info');return;}
+  openModal(`<div class="modal-title">Version History — Shot S${num}</div>
+<div class="ib ib-blue" style="margin-bottom:10px">${versions.length+1} version${versions.length?'s':''} saved. Click any version to restore it.</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;max-height:400px;overflow-y:auto">
+${current?`<div style="background:var(--bg3);border:2px solid var(--green);border-radius:8px;overflow:hidden">
+<img src="${current}" style="width:100%;aspect-ratio:16/9;object-fit:cover"/>
+<div style="padding:6px 8px"><div style="font-size:9px;font-weight:700;color:var(--green)">Current</div>
+<div style="font-size:8px;color:var(--t4)">${new Date().toLocaleDateString()}</div></div></div>`:''}
+${versions.slice().reverse().map((v,i)=>`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:8px;overflow:hidden;cursor:pointer" onclick="restoreVersion('${num}',${versions.length-1-i})">
+<img src="${v.img}" style="width:100%;aspect-ratio:16/9;object-fit:cover"/>
+<div style="padding:6px 8px"><div style="font-size:9px;font-weight:600;color:var(--t2)">v${versions.length-i}</div>
+${v.comment?`<div style="font-size:8px;color:var(--gold)">"${esc(v.comment.substring(0,30))}"</div>`:''}
+<div style="font-size:8px;color:var(--t4)">${v.ts?new Date(v.ts).toLocaleDateString():''}</div></div></div>`).join('')}
+</div>
+<div class="btn-row" style="margin-top:10px"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>`);
+}
+
+function restoreVersion(num,idx){
+  const p=DB.getProject(S.pid);if(!p)return;
+  const versions=(p.versionHistory||{})[num]||[];
+  const v=versions[idx];if(!v)return;
+  // Save current as a version first
+  const currentImg=S.sbState[num]?.img;
+  if(currentImg){
+    versions.push({img:currentImg,prompt:S.sbState[num]?.prompt||'',ts:new Date().toISOString(),comment:'replaced by restore'});
+    DB.saveProject(p);
+  }
+  S.sbState[num]={img:v.img,status:'done',prompt:v.prompt||''};
+  p.sbState=S.sbState;DB.saveProject(p);
+  closeModal();render();
+  toast(`Restored version ${idx+1} for Shot S${num}`,'ok');
+}
+
+// V2: Partial Regeneration — flag shots affected by script section changes
+function flagAffectedShots(sectionKeyword){
+  const p=DB.getProject(S.pid);if(!p)return;
+  const shots=p.shots||[];
+  const affected=shots.filter(s=>{
+    const desc=(s.scene||'')+(s.description||'')+(s.prompt||'');
+    return desc.toLowerCase().includes(sectionKeyword.toLowerCase());
+  });
+  if(!affected.length){toast('No shots match this section','info');return;}
+  const cost=(affected.length*0.06).toFixed(2);
+  if(!confirm(`${affected.length} shot(s) linked to "${sectionKeyword}".\nEstimated regeneration cost: ~$${cost}\n\nFlag these for regeneration?`))return;
+  affected.forEach(s=>{S.sbState[s.num]={status:'idle',img:S.sbState[s.num]?.img||null};});
+  p.sbState=S.sbState;DB.saveProject(p);render();
+  toast(`${affected.length} shots flagged for regeneration`,'ok');
+}
 async function runSbShot(p,shot){
   if(S.stopSb)return;
   S.sbState[shot.num]={status:'gen',img:null,prompt:''};setSbSt(shot.num,'gen','gen...');
@@ -5625,7 +6287,11 @@ async function elFetch(path,body){
 function saveInputs(){
   const p=DB.getProject(S.pid);if(!p)return;
   document.querySelectorAll('[data-bf]').forEach(el=>{if(!p.brief)p.brief={};p.brief[el.dataset.bf]=el.value;});
-  const sc=document.getElementById('script-ta');if(sc)p.script=sc.value;
+  const sc=document.getElementById('script-ta');if(sc&&sc.value!==p.script){
+    // V2: Save script version history before overwriting
+    if(p.script&&p.script.trim()){if(!p.scriptVersions)p.scriptVersions=[];p.scriptVersions.push({text:p.script,ts:new Date().toISOString()});if(p.scriptVersions.length>10)p.scriptVersions=p.scriptVersions.slice(-10);}
+    p.script=sc.value;
+  }
   document.querySelectorAll('[data-bible]').forEach(el=>{const[sec,i,key]=el.dataset.bible.split('.');if(!p.bible[sec])p.bible[sec]=[];if(!p.bible[sec][i])p.bible[sec][i]={};p.bible[sec][i][key]=el.value;});
   document.querySelectorAll('[data-shot]').forEach(el=>{const[idx,key]=el.dataset.shot.split('.');if(p.shots[idx])p.shots[idx][key]=el.value;});
   const cl=document.getElementById('lk-ta');if(cl)p.continuityLock=cl.value;
@@ -5639,26 +6305,99 @@ function saveInputs(){
 // ══════════════════════════════════════
 // API — CLAUDE
 // ══════════════════════════════════════
+// ══════════════════════════════════════
+// API ABSTRACTION & FAILOVER LAYER (V2)
+// ══════════════════════════════════════
+const AIService={
+  _lastProvider:{},// track which provider was used per category
+  _failCounts:{},// track consecutive failures per provider
+
+  async callWithFailover(category,primaryFn,fallbackFn,label){
+    const startTime=Date.now();
+    try{
+      const result=await primaryFn();
+      AIService._lastProvider[category]='primary';
+      AIService._failCounts[category+'_primary']=0;
+      AIService._logGen(category,'primary',label,Date.now()-startTime,true);
+      return result;
+    }catch(primaryErr){
+      AIService._failCounts[category+'_primary']=(AIService._failCounts[category+'_primary']||0)+1;
+      AIService._logGen(category,'primary',label,Date.now()-startTime,false,primaryErr.message);
+      console.warn(`[AIService] ${category} primary failed: ${primaryErr.message}. Trying fallback...`);
+      // Notify admin of API failure
+      if(AIService._failCounts[category+'_primary']>=2){
+        pushToRole('admin','api_failure',`⚠ ${category} API issue`,`Primary provider has failed ${AIService._failCounts[category+'_primary']} times. Failover active.`);
+      }
+      if(!fallbackFn){throw primaryErr;}
+      try{
+        const result=await fallbackFn();
+        AIService._lastProvider[category]='fallback';
+        AIService._failCounts[category+'_fallback']=0;
+        AIService._logGen(category,'fallback',label,Date.now()-startTime,true);
+        toast(`Used fallback provider for ${category}`,'info');
+        return result;
+      }catch(fallbackErr){
+        AIService._failCounts[category+'_fallback']=(AIService._failCounts[category+'_fallback']||0)+1;
+        AIService._logGen(category,'fallback',label,Date.now()-startTime,false,fallbackErr.message);
+        throw new Error(`All ${category} providers failed. Primary: ${primaryErr.message}. Fallback: ${fallbackErr.message}`);
+      }
+    }
+  },
+
+  _logGen(category,provider,label,durationMs,success,error){
+    // Fire-and-forget generation log for debugging and cost tracking
+    const entry={category,provider,label:label||'',durationMs,success,error:error||null,ts:new Date().toISOString()};
+    if(!window._aiGenLog)window._aiGenLog=[];
+    window._aiGenLog.push(entry);
+    if(window._aiGenLog.length>100)window._aiGenLog=window._aiGenLog.slice(-50);
+  },
+
+  getProviderStatus(){
+    return{
+      script:{last:AIService._lastProvider.script||'—',fails:AIService._failCounts.script_primary||0},
+      image:{last:AIService._lastProvider.image||'—',fails:AIService._failCounts.image_primary||0},
+      video:{last:AIService._lastProvider.video||'—',fails:AIService._failCounts.video_primary||0},
+      audio:{last:AIService._lastProvider.audio||'—',fails:AIService._failCounts.audio_primary||0},
+    };
+  }
+};
+
 async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
   aiStart();
   try{
-  const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
-  const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
-  const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
-  // Route through Supabase edge function to avoid CORS (Anthropic API blocks direct browser requests)
-  const sbUrl=(SB._url||localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
-  const sbKey=SB._key||localStorage.getItem('sb_key')||'';
-  const proxyUrl=sbUrl?sbUrl+'/functions/v1/claude-proxy':'';
-  let r;
-  if(proxyUrl&&sbKey){
-    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
-  }else{
-    // Server route — sends client key as header; server prefers its own CLAUDE_API_KEY env var
-    const headers=_authHeaders({'anthropic-version':'2023-06-01'});
-    if(k)headers['x-api-key']=k; // only send if we have one — server may have its own
-    r=await fetch('/api/claude',{method:'POST',headers,body:payload});
-  }
-  const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
+  return await AIService.callWithFailover('script',
+    // Primary: Claude via Anthropic
+    async()=>{
+      const k=kC();
+      const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
+      const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
+      const sbUrl=(SB._url||localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
+      const sbKey=SB._key||localStorage.getItem('sb_key')||'';
+      const proxyUrl=sbUrl?sbUrl+'/functions/v1/claude-proxy':'';
+      let r;
+      if(proxyUrl&&sbKey){
+        r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
+      }else{
+        const headers=_authHeaders({'anthropic-version':'2023-06-01'});
+        if(k)headers['x-api-key']=k;
+        r=await fetch('/api/claude',{method:'POST',headers,body:payload});
+      }
+      const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
+    },
+    // Fallback: OpenAI GPT-4o (if integration configured)
+    (()=>{
+      const openaiIntg=DB.getIntegrations().find(i=>i.name?.includes('OpenAI')&&i.active&&i.key);
+      if(!openaiIntg)return null;
+      return async()=>{
+        const r=await fetch(openaiIntg.url||'https://api.openai.com/v1/chat/completions',{
+          method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+openaiIntg.key},
+          body:JSON.stringify({model:'gpt-4o',max_tokens:max,messages:[{role:'system',content:sys},{role:'user',content:user}]})
+        });
+        const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.choices?.[0]?.message?.content||'';
+      };
+    })(),
+    'script_generation'
+  );
   }finally{aiEnd();}
 }
 
@@ -5718,7 +6457,7 @@ async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!
 // ══════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════
-function wfMiniDots(p){const steps=['Brief','Synopsis','Locked','Storyboard','Review','Done'];const wf=p.workflowStatus||'new';const idx=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf);return`<div style="display:flex;gap:3px;align-items:center">${steps.map((s,i)=>`<div style="width:6px;height:6px;border-radius:50%;background:${i<idx?'var(--green)':i===idx?'var(--gold)':'var(--b3)'}" title="${s}"></div>${i<steps.length-1?'<div style="width:7px;height:1px;background:var(--b2)"></div>':''}`).join('')}</div>`;}
+function wfMiniDots(p){const steps=['Brief','Synopsis','Locked','Storyboard','Review','Done'];const wf=p.workflowStatus||'new';const idx=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','ready_for_delivery','delivered'].indexOf(wf);return`<div style="display:flex;gap:3px;align-items:center">${steps.map((s,i)=>`<div style="width:6px;height:6px;border-radius:50%;background:${i<idx?'var(--green)':i===idx?'var(--gold)':'var(--b3)'}" title="${s}"></div>${i<steps.length-1?'<div style="width:7px;height:1px;background:var(--b2)"></div>':''}`).join('')}</div>`;}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
 // AI Engine indicator — tracks active AI operations
