@@ -86,7 +86,7 @@ html { scroll-behavior: smooth; }
 
 /* Display font — Syne for all headings */
 h1, h2, h3, .page-title, .modal-title, .login-logo, .login-hero-logo, .dash-hero-greeting, .ptitle {
-  font-family: var(--display);
+  font-family: var(--display) !important;
 }
 
 body {
@@ -339,8 +339,8 @@ body::after {
   transition: all 0.3s ease;
 }
 .ai-indicator.active {
-  background: var(--cyan);
-  animation: aiPulse 2s ease-in-out infinite;
+  background-color: var(--cyan-glow) !important;
+  animation: aiPulse 2s ease-in-out infinite !important;
 }
 .ai-indicator.idle {
   background: var(--b3);
