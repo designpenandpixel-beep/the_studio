@@ -785,7 +785,7 @@ ${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab(
 ${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
 </nav>
 <div class="app-bar-right">
-<div id="ai-engine-dot" class="ai-indicator" title="AI Engine: idle" style="cursor:help"></div>
+<div id="ai-engine-dot" class="ai-indicator" title="AI Engine: ready" style="cursor:help"></div>
 ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
   <div style="display:flex;gap:4px;align-items:center">
     <span style="font-size:9px;color:var(--t3)">API Keys</span>
@@ -5723,8 +5723,8 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
 
 // AI Engine indicator — tracks active AI operations
 let _aiOps=0;
-function aiStart(){_aiOps++;const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator active';d.title='AI Engine: processing ('+_aiOps+' active)';}}
-function aiEnd(){_aiOps=Math.max(0,_aiOps-1);if(_aiOps===0){const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator idle';d.title='AI Engine: idle';}}}
+function aiStart(){_aiOps++;const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator generating';d.title='AI Engine: processing ('+_aiOps+' active)';}}
+function aiEnd(){_aiOps=Math.max(0,_aiOps-1);if(_aiOps===0){const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator';d.title='AI Engine: ready';}}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function toast(msg,type=''){const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3500)}
 function copyText(id){const el=document.getElementById(id);if(!el)return;navigator.clipboard.writeText(el.value).then(()=>toast('Copied!','ok'))}

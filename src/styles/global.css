@@ -75,6 +75,21 @@
   /* Monospace */
   --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   --display: 'Syne', 'Inter', sans-serif;
+
+  /* Design spec aliases (--color-* naming convention) */
+  --color-base: var(--bg);
+  --color-surface: var(--bg2);
+  --color-elevated: var(--bg3);
+  --color-border: var(--b1);
+  --color-muted: var(--t3);
+  --color-body: var(--t2);
+  --color-heading: var(--t1);
+  --color-orange: var(--gold);
+  --color-violet: var(--purple);
+  --color-cyan: var(--cyan);
+  --color-success: var(--green);
+  --color-warning: var(--warning);
+  --color-danger: var(--red);
 }
 
 /* ─────────────────────────────────────────
@@ -334,17 +349,15 @@ body::after {
 .ai-indicator {
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: var(--b3);
+  background: var(--cyan) !important;
+  box-shadow: 0 0 6px var(--cyan-glow);
   flex-shrink: 0;
-  transition: all 0.3s ease;
+  animation: aiPulse 2s ease-in-out infinite;
 }
-.ai-indicator.active {
-  background-color: var(--cyan-glow) !important;
-  animation: aiPulse 2s ease-in-out infinite !important;
-}
-.ai-indicator.idle {
-  background: var(--b3);
-  animation: none;
+.ai-indicator.generating {
+  background: var(--cyan) !important;
+  box-shadow: 0 0 12px var(--cyan), 0 0 24px var(--cyan-glow);
+  animation: aiPulse 1s ease-in-out infinite;
 }
 
 .ai-load { display: none; align-items: center; gap: 10px; color: var(--t4); font-size: 12px; padding: 14px 0; }
