@@ -785,6 +785,7 @@ ${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab(
 ${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
 </nav>
 <div class="app-bar-right">
+<div id="ai-engine-dot" class="ai-indicator" title="AI Engine: idle" style="cursor:help"></div>
 ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
   <div style="display:flex;gap:4px;align-items:center">
     <span style="font-size:9px;color:var(--t3)">API Keys</span>
@@ -889,19 +890,27 @@ function adminDashboard(){
   </div>
 </div>
 <div class="dash-tiles">
-${[
-  {n:ps.length,l:'Total Projects',icon:'◈',grad:'var(--grad-hero)',f:{},tab:'projects'},
-  {n:clients.length,l:'Clients',icon:'◉',grad:'var(--grad-ai)',f:{},tab:'clients'},
-  {n:creators.length,l:'Creators',icon:'✦',grad:'linear-gradient(135deg,#3B82F6,#06B6D4)',f:{},tab:'creators'},
-  {n:needs.length,l:'Need Attention',icon:'⚡',grad:'linear-gradient(135deg,#EF4444,#FF6B35)',f:{},tab:'projects'},
-  {n:complete,l:'Complete',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'complete'},tab:'projects'},
-  {n:inProd,l:'In Production',icon:'▶',grad:'linear-gradient(135deg,#06B6D4,#8B5CF6)',f:{status:'storyboard_in_progress'},tab:'projects'},
-  {n:inSyn,l:'In Review',icon:'◎',grad:'linear-gradient(135deg,#F59E0B,#FF6B35)',f:{status:'synopsis_review'},tab:'projects'}
-].map(s=>`<div class="dash-tile" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')">
+${(()=>{
+  // Calculate week-over-week deltas
+  const weekAgo=new Date(Date.now()-7*864e5);
+  const newThisWeek=ps.filter(p=>p.createdAt&&new Date(p.createdAt)>weekAgo).length;
+  const completedThisWeek=ps.filter(p=>p.workflowStatus==='complete'&&p.updatedAt&&new Date(p.updatedAt)>weekAgo).length;
+  const newClientsThisWeek=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>weekAgo).length;
+  function delta(n){return n>0?`<span style="color:var(--green);font-size:8px">+${n} this week</span>`:n<0?`<span style="color:var(--red);font-size:8px">${n} this week</span>`:''}
+  return[
+  {n:ps.length,d:delta(newThisWeek),l:'Total Projects',icon:'◈',grad:'var(--grad-hero)',f:{},tab:'projects'},
+  {n:clients.length,d:delta(newClientsThisWeek),l:'Clients',icon:'◉',grad:'var(--grad-ai)',f:{},tab:'clients'},
+  {n:creators.length,d:'',l:'Creators',icon:'✦',grad:'linear-gradient(135deg,#3B82F6,#06B6D4)',f:{},tab:'creators'},
+  {n:needs.length,d:needs.length?`<span style="color:var(--warning);font-size:8px">action needed</span>`:'',l:'Need Attention',icon:'⚡',grad:'linear-gradient(135deg,#EF4444,#FF6B35)',f:{},tab:'projects',glow:needs.length>0},
+  {n:complete,d:delta(completedThisWeek),l:'Complete',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'complete'},tab:'projects'},
+  {n:inProd,d:'',l:'In Production',icon:'▶',grad:'linear-gradient(135deg,#06B6D4,#8B5CF6)',f:{status:'storyboard_in_progress'},tab:'projects'},
+  {n:inSyn,d:'',l:'In Review',icon:'◎',grad:'linear-gradient(135deg,#F59E0B,#FF6B35)',f:{status:'synopsis_review'},tab:'projects'}
+].map(s=>`<div class="dash-tile${s.glow?' dash-tile-glow':''}" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')">
   <div class="dash-tile-icon" style="background:${s.grad}">${s.icon}</div>
   <div class="dash-tile-num" style="background:${s.grad};-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">${s.n}</div>
   <div class="dash-tile-label">${s.l}</div>
-</div>`).join('')}
+  ${s.d?`<div style="margin-top:4px">${s.d}</div>`:''}
+</div>`).join('');})()}
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -5597,6 +5606,8 @@ function dlAllVids(){const p=DB.getProject(S.pid);if(!p)return;(p.vidPrompts||[]
 // API — ELEVENLABS (server-side proxy)
 // ══════════════════════════════════════
 async function elFetch(path,body){
+  aiStart();
+  try{
   const k=kE(); // client key as fallback if server has no env var
   const r=await fetch('/api/elevenlabs',{
     method:'POST',
@@ -5605,6 +5616,7 @@ async function elFetch(path,body){
   });
   if(!r.ok){const d=await r.json().catch(()=>({error:'EL error '+r.status}));throw new Error(d.error||'EL '+r.status);}
   return r;
+  }finally{aiEnd();}
 }
 
 // ══════════════════════════════════════
@@ -5628,6 +5640,8 @@ function saveInputs(){
 // API — CLAUDE
 // ══════════════════════════════════════
 async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
+  aiStart();
+  try{
   const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
   const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
   const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
@@ -5645,6 +5659,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
     r=await fetch('/api/claude',{method:'POST',headers,body:payload});
   }
   const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
+  }finally{aiEnd();}
 }
 
 // ══════════════════════════════════════
@@ -5652,6 +5667,7 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
 async function falImg(prompt){
+  aiStart();
   const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   if(S.stopSb)throw new Error('Stopped');
   const rat=S.imgAspect||document.getElementById('s-rat')?.value||'16:9';
@@ -5674,7 +5690,7 @@ async function falImg(prompt){
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${model}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${model}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb){aiEnd();throw new Error('Stopped');}const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){aiEnd();const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED'){aiEnd();throw new Error('fal generation failed');}}aiEnd();throw new Error('Timeout');
 }
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
@@ -5704,6 +5720,11 @@ async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!
 // ══════════════════════════════════════
 function wfMiniDots(p){const steps=['Brief','Synopsis','Locked','Storyboard','Review','Done'];const wf=p.workflowStatus||'new';const idx=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf);return`<div style="display:flex;gap:3px;align-items:center">${steps.map((s,i)=>`<div style="width:6px;height:6px;border-radius:50%;background:${i<idx?'var(--green)':i===idx?'var(--gold)':'var(--b3)'}" title="${s}"></div>${i<steps.length-1?'<div style="width:7px;height:1px;background:var(--b2)"></div>':''}`).join('')}</div>`;}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+// AI Engine indicator — tracks active AI operations
+let _aiOps=0;
+function aiStart(){_aiOps++;const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator active';d.title='AI Engine: processing ('+_aiOps+' active)';}}
+function aiEnd(){_aiOps=Math.max(0,_aiOps-1);if(_aiOps===0){const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator idle';d.title='AI Engine: idle';}}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function toast(msg,type=''){const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3500)}
 function copyText(id){const el=document.getElementById(id);if(!el)return;navigator.clipboard.writeText(el.value).then(()=>toast('Copied!','ok'))}
