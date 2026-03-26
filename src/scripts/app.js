@@ -2234,7 +2234,7 @@ function adminPMs(){
 function pmAdminCard(pm){
   const stars=pm.avgRating||0;
   const ratings=pm.ratings?.length||0;
-  const starHtml=Array.from({length:5},(_,i)=>`<span style="color:${i<Math.round(stars)?'#F59E0B':'var(--b2)';font-size:13px">★</span>`).join('');
+  const starHtml=Array.from({length:5},(_,i)=>`<span style="color:${i<Math.round(stars)?'#F59E0B':'var(--b2)'};font-size:13px">★</span>`).join('');
   return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:12px;transition:border-color 0.2s" onmouseenter="this.style.borderColor='var(--gold)'" onmouseleave="this.style.borderColor='var(--b1)'">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
       <div style="display:flex;align-items:center;gap:10px">
@@ -2760,16 +2760,10 @@ Return ONLY valid JSON:
     // Regular PM response
     try{
       const mem=DB.getPMMemory(pmId,clientId);
-      const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('
-');
+      const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('\n');
       const r=await callClaude(
-        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'
-
-Brand notes: '+mem.brandNotes:''}`,
-        `Recent conversation:
-${recentChats}
-
-Client: ${text}`,
+        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'\n\nBrand notes: '+mem.brandNotes:''}`,
+        `Recent conversation:\n${recentChats}\n\nClient: ${text}`,
         300
       );
       DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:r.trim(),ts:new Date().toISOString()});
