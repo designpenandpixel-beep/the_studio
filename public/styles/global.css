@@ -84,6 +84,11 @@
 
 html { scroll-behavior: smooth; }
 
+/* Display font — Syne for all headings */
+h1, h2, h3, .page-title, .modal-title, .login-logo, .login-hero-logo, .dash-hero-greeting, .ptitle {
+  font-family: var(--display);
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg);
@@ -324,7 +329,7 @@ body::after {
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes aiPulse {
   0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--cyan); }
-  50% { opacity: 1; box-shadow: 0 0 10px var(--cyan), 0 0 20px rgba(6,182,212,0.3); }
+  50% { opacity: 1; box-shadow: 0 0 10px var(--cyan), 0 0 20px var(--cyan-glow); }
 }
 .ai-indicator {
   width: 8px; height: 8px;

@@ -1086,9 +1086,9 @@ function projKanban(projects){
     {id:'new',label:'New',color:'#555',icon:'○'},
     {id:'brief_submitted',label:'Brief Received',color:'var(--gold)',icon:'📋'},
     {id:'synopsis_review',label:'Synopsis Review',color:'var(--blue)',icon:'📝'},
-    {id:'synopsis_locked',label:'Synopsis Approved',color:'#2ac09a',icon:'✓'},
+    {id:'synopsis_locked',label:'Synopsis Approved',color:'var(--green)',icon:'✓'},
     {id:'storyboard_in_progress',label:'Storyboard',color:'var(--purple)',icon:'🎨'},
-    {id:'storyboard_review',label:'Client Review',color:'#e06040',icon:'👁'},
+    {id:'storyboard_review',label:'Client Review',color:'var(--gold)',icon:'👁'},
     {id:'complete',label:'Complete',color:'var(--green)',icon:'✓✓'},
   ];
   const hideCols=S.kanbanHide||{};
@@ -1138,16 +1138,16 @@ function kanbanCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
   const now=new Date();const isOverdue=p.deadline&&new Date(p.deadline)<now&&p.workflowStatus!=='complete';
   const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-  const priColors={high:'#c04a4a',medium:'#FF6B35',low:'#3a3a3a'};
+  const priColors={high:'var(--red)',medium:'#FF6B35',low:'#3a3a3a'};
   const priLabels={high:'HIGH',medium:'MED',low:'LOW'};
-  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const typeAccents={gold:'#FF6B35',purple:'var(--purple)',red:'var(--red)',blue:'var(--blue)',teal:'var(--green)',green:'var(--green)',pink:'#EC4899',coral:'var(--gold)'};
   const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const unread=getUnreadCommentCount(p,S.session?.userId);
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(p.workflowStatus||'new')+1)/6*100);
-  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
+  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'var(--red)55':isAtRisk?'var(--warning)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
   onmouseover="this.style.borderColor='${accent}44';this.style.transform='translateY(-1px)'"
-  onmouseout="this.style.borderColor='${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'}';this.style.transform=''"
+  onmouseout="this.style.borderColor='${isOverdue?'var(--red)55':isAtRisk?'var(--warning)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'}';this.style.transform=''"
   onclick="S.detailPid='${p.id}';S.tab='projects';render()">
 <!-- Type accent bar -->
 <div style="height:3px;background:${accent};opacity:0.8"></div>
@@ -1179,7 +1179,7 @@ ${(p.tags||[]).length?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin:4p
   p.deadline?'📅 '+new Date(p.deadline).toLocaleDateString():''
 }</span>
 <div style="display:flex;gap:4px;align-items:center">
-${alert?`<span style="background:#c04a4a22;color:var(--red);font-size:7px;font-weight:700;padding:1px 4px;border-radius:3px">!</span>`:''}
+${alert?`<span style="background:var(--red)22;color:var(--red);font-size:7px;font-weight:700;padding:1px 4px;border-radius:3px">!</span>`:''}
 ${unread?`<span style="background:var(--red);color:#fff;font-size:7px;font-weight:700;border-radius:8px;padding:1px 4px">💬${unread}</span>`:''}
 
 <button onclick="event.stopPropagation();openStudio('${p.id}')" style="background:${accent}22;border:1px solid ${accent}44;color:${accent};font-size:7px;font-weight:700;padding:2px 5px;border-radius:3px;cursor:pointer">OPEN</button>
@@ -1199,7 +1199,7 @@ ${projects.map(p=>{
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf)+1)/6*100);
-  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'#c04a4a33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
+  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'var(--red)33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
 <div style="padding:12px 14px;border-bottom:1px solid var(--b1)">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:7px">
 <div style="font-size:16px">${mt?.icon||'?'}</div>
@@ -1287,8 +1287,8 @@ ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH<
 <button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
 </div></div>
 
-${isOverdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(p.deadline)} days overdue.</strong> Deadline was ${new Date(p.deadline).toLocaleDateString()}.</div>`:''}
-${atRisk?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#FF8A5C">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
+${isOverdue?`<div style="background:#100404;border:1px solid var(--red)44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(p.deadline)} days overdue.</strong> Deadline was ${new Date(p.deadline).toLocaleDateString()}.</div>`:''}
+${atRisk?`<div style="background:#120d00;border:1px solid var(--warning)44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#FF8A5C">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
 
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
 ${[
@@ -1649,7 +1649,7 @@ ${replyParent?`<div style="background:var(--bg4);border-left:2px solid var(--b3)
 <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
 <button onclick="setReplyTarget('${cm.id}','${esc(cm.authorName)}')" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer;padding:0">↩ Reply</button>
 ${canEdit?`<button onclick="startEditComment('${cm.id}')" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer;padding:0">Edit</button>`:''}
-${canDelete?`<button onclick="deleteComment('${p.id}','${cm.id}')" style="background:none;border:none;color:#c04a4a88;font-size:9px;cursor:pointer;padding:0">Delete</button>`:''}
+${canDelete?`<button onclick="deleteComment('${p.id}','${cm.id}')" style="background:none;border:none;color:var(--red)88;font-size:9px;cursor:pointer;padding:0">Delete</button>`:''}
 <button onclick="copyCommentLink('${cm.id}')" style="background:none;border:none;color:var(--t4);font-size:9px;cursor:pointer;padding:0">🔗</button>
 </div></div></div>
 ${replies.length?`<div style="margin-top:5px">${replies.map(r=>renderComment(r,true)).join('')}</div>`:''}
@@ -1766,11 +1766,11 @@ function copyCommentLink(cmId){
 const WF_STAGES=[
   {id:'new',label:'Created',color:'#3a3a3a',short:'New'},
   {id:'brief_submitted',label:'Brief',color:'#FF6B35',short:'Brief'},
-  {id:'synopsis_review',label:'Synopsis',color:'#4a8fc0',short:'Synopsis'},
-  {id:'synopsis_locked',label:'Approved',color:'#2ac09a',short:'Approved'},
-  {id:'storyboard_in_progress',label:'Storyboard',color:'#8a6fd4',short:'Board'},
-  {id:'storyboard_review',label:'Review',color:'#e06040',short:'Review'},
-  {id:'complete',label:'Complete',color:'#4ac04a',short:'Done'},
+  {id:'synopsis_review',label:'Synopsis',color:'var(--blue)',short:'Synopsis'},
+  {id:'synopsis_locked',label:'Approved',color:'var(--green)',short:'Approved'},
+  {id:'storyboard_in_progress',label:'Storyboard',color:'var(--purple)',short:'Board'},
+  {id:'storyboard_review',label:'Review',color:'var(--gold)',short:'Review'},
+  {id:'complete',label:'Complete',color:'var(--green)',short:'Done'},
 ];
 function stageColor(id){return WF_STAGES.find(s=>s.id===id)?.color||'#555';}
 function stageLabel(id){return WF_STAGES.find(s=>s.id===id)?.label||id.replace(/_/g,' ');}
@@ -1825,8 +1825,8 @@ ${[
 <div style="font-size:9px;color:var(--t4);text-transform:uppercase;margin-top:3px">${s.l}</div></div>`).join('')}
 </div>
 
-${overdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(deadline)} days overdue.</strong> Deadline was ${new Date(deadline).toLocaleDateString()}.</div>`:''}
-${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#FF8A5C">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
+${overdue?`<div style="background:#100404;border:1px solid var(--red)44;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(deadline)} days overdue.</strong> Deadline was ${new Date(deadline).toLocaleDateString()}.</div>`:''}
+${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid var(--warning)44;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#FF8A5C">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
 
 <div style="margin-bottom:18px">
 <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t4);margin-bottom:5px">
@@ -1942,7 +1942,7 @@ function adminTimeline(){
 
     // Label area
     rows+=`<text x="8" y="${y+14}" fill="${isOverdue?'#F87171':'#F0F0FF'}" font-size="10" font-weight="700" font-family="Arial,sans-serif" style="cursor:pointer" onclick="openStudio('${p.id}')">${esc(p.name.substring(0,26)+(p.name.length>26?'…':''))}</text>`;
-    rows+=`<text x="8" y="${y+26}" fill="${isOverdue?'#c04a4a':'#666'}" font-size="8" font-family="Arial,sans-serif">${p.projectId||'—'} · ${cl?esc(cl.name.substring(0,14)):'No client'}</text>`;
+    rows+=`<text x="8" y="${y+26}" fill="${isOverdue?'var(--red)':'#666'}" font-size="8" font-family="Arial,sans-serif">${p.projectId||'—'} · ${cl?esc(cl.name.substring(0,14)):'No client'}</text>`;
     rows+=`<text x="8" y="${y+36}" fill="${stageColor(p.workflowStatus||'new')}" font-size="8" font-family="Arial,sans-serif" font-weight="700">${stageLabel(p.workflowStatus||'new').toUpperCase()}</text>`;
 
     // Separator
@@ -3112,13 +3112,13 @@ ${sorted.length?sorted.map(p=>creatorProjCard(p)).join(''):'<div style="color:va
 
 function creatorProjCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const wf=p.workflowStatus||'new';const alert=p.newBrief||p.pendingFeedback;
-  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const typeAccents={gold:'#FF6B35',purple:'var(--purple)',red:'var(--red)',blue:'var(--blue)',teal:'var(--green)',green:'var(--green)',pink:'#EC4899',coral:'var(--gold)'};
   const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const revs=p.synopsisRevisions||[];const hasSyn=revs.length>0;
   const brief={...p.clientBrief,...p.brief};const briefKeys=Object.keys(brief).filter(k=>brief[k]&&k!=='videoRefUrl'&&k!=='additionalNotes');
   const unread=getUnreadCommentCount(p,S.session?.userId);
   const clAssets=cl?.brandAssets||[];
-  return`<div style="background:var(--bg2);border:1px solid ${alert?'#c04a4a44':'var(--b1)'};border-top:2px solid ${alert?'var(--red)':accent};border-radius:9px;overflow:hidden">
+  return`<div style="background:var(--bg2);border:1px solid ${alert?'var(--red)44':'var(--b1)'};border-top:2px solid ${alert?'var(--red)':accent};border-radius:9px;overflow:hidden">
 <!-- Header -->
 <div style="padding:11px 14px;display:flex;align-items:flex-start;gap:10px;border-bottom:1px solid var(--b1)">
 <div style="font-size:20px;flex-shrink:0;line-height:1.2">${mt?.icon||'?'}</div>
@@ -3180,7 +3180,7 @@ function creatorProjectDetail(p){
   const brief={...p.clientBrief,...p.brief};
   const revs=p.synopsisRevisions||[];
   const clAssets=cl?.brandAssets||[];
-  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const typeAccents={gold:'#FF6B35',purple:'var(--purple)',red:'var(--red)',blue:'var(--blue)',teal:'var(--green)',green:'var(--green)',pink:'#EC4899',coral:'var(--gold)'};
   const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   return`<div class="page">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
@@ -3287,7 +3287,7 @@ function creatorInbox(){
 <div><div class="page-title">Inbox</div><div class="page-sub">${notifs.length} notifications · ${unread} unread</div></div>
 ${unread?`<button class="btn btn-ghost btn-sm" onclick="DB.markAllRead('${uid}');render()">Mark all read</button>`:''}
 </div>
-${notifs.length?notifs.map(n=>{const typeColors={brief:'rgba(255,107,53,0.25)',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'rgba(255,107,53,0.12)'};const col=typeColors[n.type]||'var(--b1)';
+${notifs.length?notifs.map(n=>{const typeColors={brief:'rgba(255,107,53,0.25)',synopsis:'var(--blue)33',approval:'#4ac04a33',storyboard:'var(--purple)33',feedback:'var(--red)44',revision:'var(--red)44',project:'rgba(255,107,53,0.12)'};const col=typeColors[n.type]||'var(--b1)';
 return`<div class="inbox-notif" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}">
 <div style="width:8px;height:8px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:4px"></div>
 <div style="flex:1"><div style="font-size:11px;font-weight:700;color:${n.read?'var(--t2)':'#fff'}">${esc(n.title)}</div>
@@ -3890,7 +3890,7 @@ ${['new','brief_submitted','synopsis_review','synopsis_locked','storyboard_in_pr
 </select>
 <div style="display:flex;align-items:center;gap:4px">
 <span style="font-size:8px;color:var(--t4);text-transform:uppercase">Deadline</span>
-<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0a02044':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#FF8A5C':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
+<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'var(--warning)44':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#FF8A5C':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
 </div>
 ${wf==='brief_submitted'||p.newBrief?`<button class="btn btn-gold btn-sm" onclick="genSynopsis()">✦ Generate Synopsis</button>`:''}
 ${p.type==='design'?`<button class="btn btn-purple btn-sm" onclick="openCanvaForDesign('${p.id}')">🎨 Open in Canva</button>`:'' }
