@@ -109,7 +109,11 @@ const IMG_MODELS=[
   {id:'fal-ai/kolors',n:'Kolors',s:'Vivid colors, commercial look',tags:['commercial','vivid'],c:'~$0.03/img'},
   {id:'fal-ai/playground-v25',n:'Playground v2.5',s:'Aesthetic, social media quality',tags:['social','aesthetic'],c:'~$0.02/img'},
   {id:'openai/dall-e-3',n:'DALL-E 3',s:'Creative, accurate prompt following',tags:['creative','accurate'],c:'~$0.08/img'},
-  {id:'fal-ai/soul-cinema',n:'Soul Cinema',s:'Cinematic grade, film aesthetics',tags:['cinematic','film'],c:'~$0.07/img'}
+  {id:'fal-ai/soul-cinema',n:'Soul Cinema',s:'Cinematic grade, film aesthetics',tags:['cinematic','film'],c:'~$0.07/img'},
+  {id:'openai/gpt-image-1',n:'GPT Image (OpenAI)',s:'Precise prompt following, text-in-image',tags:['accurate','text'],c:'~$0.08/img'},
+  {id:'google/imagen-3',n:'Imagen 3 (Google)',s:'Enterprise photorealism, Vertex AI',tags:['photorealistic','enterprise'],c:'~$0.08/img'},
+  {id:'adobe/firefly-image-3',n:'Adobe Firefly 3',s:'Copyright-safe, licensed training data',tags:['commercial-safe','licensed'],c:'~$0.06/img'},
+  {id:'leonardo/phoenix',n:'Leonardo Phoenix',s:'Product viz, concept art, game assets',tags:['product','concept'],c:'~$0.04/img'}
 ];
 const IMG_QUALITY=['standard','hd'];
 const IMG_TONES=['photorealistic','cinematic','illustration','editorial','minimal','vibrant','moody','warm','cool'];
@@ -134,7 +138,11 @@ const VIDEO_MODELS=[
   {id:'fal-ai/cogvideox-5b/image-to-video',n:'CogVideoX 5B',s:'Open source, consistent',tags:['open-source'],c:'~$0.05–0.12'},
   {id:'fal-ai/haiper-video-v2',n:'Haiper v2',s:'Smooth motion, natural scenes',tags:['smooth','natural'],c:'~$0.10–0.20'},
   {id:'fal-ai/seedance-pro',n:'Seedance Pro',s:'Dance, movement, body motion',tags:['motion','body'],c:'~$0.20–0.40'},
-  {id:'openai/sora-2',n:'Sora 2',s:'Long-form, coherent narratives',tags:['long-form','narrative'],c:'~$1.00–2.00/shot'}
+  {id:'openai/sora-2',n:'Sora 2',s:'Long-form, coherent narratives',tags:['long-form','narrative'],c:'~$1.00–2.00/shot'},
+  {id:'lightricks/ltx-2',n:'LTX-2 (Lightricks)',s:'4K · 50fps · copyright-safe · ComfyUI ready',tags:['4k','open-source','commercial-safe'],c:'~$0.04–0.10'},
+  {id:'tencent/hunyuan-video',n:'HunyuanVideo',s:'Cinematic, open-source, strong motion',tags:['cinematic','open-source'],c:'~$0.05–0.12'},
+  {id:'skyreels/v1',n:'SkyReels V1',s:'Human-centric, 33 expressions, film-trained',tags:['human','cinematic'],c:'~$0.15–0.30'},
+  {id:'adobe/firefly-video',n:'Adobe Firefly Video',s:'Copyright-safe, Premiere Pro integration',tags:['commercial-safe','premiere'],c:'~$0.20–0.50'}
 ];
 
 const VEO_RULES=[
