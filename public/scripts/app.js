@@ -137,7 +137,20 @@ const VEO_RULES=[
 // DATA LAYER — in-memory cache + localStorage fallback + Supabase sync
 // ══════════════════════════════════════
 let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[];
-function _tryLS(fn){try{fn()}catch(e){}}
+function _tryLS(fn){try{fn()}catch(e){console.warn('localStorage error:',e.message);}}
+
+// Debounce utility — delays fn execution until wait ms after last call
+let _debounceTimers={};
+function debounceRender(key,ms){clearTimeout(_debounceTimers[key]);_debounceTimers[key]=setTimeout(()=>render(),ms||300);}
+
+// Safe password visibility toggle
+function togglePwVis(btn){
+  const code=btn?.previousElementSibling;
+  if(!code||!code.dataset.pw)return;
+  const masked='••••••••';
+  code.textContent=code.textContent===masked?code.dataset.pw:masked;
+  btn.textContent=code.textContent===masked?'👁':'👁‍🗨';
+}
 function _loadLS(){
   _tryLS(()=>{const u=localStorage.getItem('sv2_users');if(u)_users=JSON.parse(u)});
   _tryLS(()=>{const p=localStorage.getItem('sv2_projects');if(p)_projects=JSON.parse(p)});
@@ -151,7 +164,7 @@ _loadLS();
 // ── Supabase REST layer ──
 const SB={
   _url:'',_key:'',_status:'unconfigured', // unconfigured | ok | error | syncing
-  _queue:[],_flushing:false,
+  _queue:[],_flushing:false,_retries:0,_maxRetries:3,_dirty:new Set(), // _dirty tracks IDs with local unsaved changes
   init(){
     this._url=localStorage.getItem('sb_url')||'';
     this._key=localStorage.getItem('sb_key')||'';
@@ -168,7 +181,7 @@ const SB={
   _rh(){return{'apikey':this._key,'Authorization':'Bearer '+this._key,'Accept':'application/json'}},
   _wh(){return{'apikey':this._key,'Authorization':'Bearer '+this._key,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}},
   headers(){return this._wh()},
-  _updateDot(){const d=document.getElementById('sb-dot');if(!d)return;const m={ok:'var(--green)',error:'var(--red)',syncing:'#e0c070',unconfigured:'var(--b3)',saved:'#B8960C'};d.style.background=m[this._status]||'var(--b3)';const labels={ok:'Connected ✓',error:'Connection error',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — not verified'};d.title='Supabase: '+(labels[this._status]||this._status);},
+  _updateDot(){const d=document.getElementById('sb-dot');if(!d)return;const m={ok:'var(--green)',error:'var(--red)',syncing:'#FF8A5C',unconfigured:'var(--b3)',saved:'#FF6B35'};d.style.background=m[this._status]||'var(--b3)';const labels={ok:'Connected ✓',error:'Connection error',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — not verified'};d.title='Supabase: '+(labels[this._status]||this._status);},
   // Low-level REST
   async _get(table){
     if(!this.ready())return null;
@@ -202,40 +215,67 @@ const SB={
       if(!r.ok)throw new Error(r.status);
     }catch(e){this._status='error';this._updateDot();console.warn('SB delete',table,id,e.message);}
   },
-  // Enqueue write (fire-and-forget, non-blocking)
+  // Enqueue write — queues even when not ready (will flush when connected)
   push(table,id,data){
-    if(!this.ready())return;
+    this._dirty.add(table+':'+id);
     this._queue.push({table,id,data});
-    this._flush();
+    if(this.ready())this._flush();
   },
-  del(table,id){if(!this.ready())return;this._queue.push({table,id,_delete:true});this._flush();},
+  del(table,id){this._dirty.delete(table+':'+id);this._queue.push({table,id,_delete:true});if(this.ready())this._flush();},
   async _flush(){
-    if(this._flushing||!this._queue.length)return;
+    if(this._flushing||!this._queue.length||!this.ready())return;
     this._flushing=true;this._status='syncing';this._updateDot();
+    const failed=[];
     while(this._queue.length){
       const op=this._queue.shift();
-      if(op._delete)await this._delete(op.table,op.id);
-      else if(op._ld)await this._upsertLD(op.entry);
-      else if(op._delLD)await this._delLD(op.id);
-      else await this._upsert(op.table,op.id,op.data);
+      let ok=false;
+      for(let attempt=0;attempt<this._maxRetries;attempt++){
+        try{
+          if(op._delete)await this._delete(op.table,op.id);
+          else if(op._ld)await this._upsertLD(op.entry);
+          else if(op._delLD)await this._delLD(op.id);
+          else await this._upsert(op.table,op.id,op.data);
+          ok=true;
+          this._dirty.delete((op.table||'ld')+':'+(op.id||op.entry?.id));
+          break;
+        }catch(e){
+          console.warn('SB flush retry',attempt+1,'/',this._maxRetries,e.message);
+          if(attempt<this._maxRetries-1)await new Promise(r=>setTimeout(r,1000*(attempt+1))); // backoff: 1s, 2s, 3s
+        }
+      }
+      if(!ok){failed.push(op);console.warn('SB flush failed permanently:',op.table,op.id);}
     }
-    this._flushing=false;if(this._status==='syncing'){this._status='ok';this._updateDot();}
+    if(failed.length){this._queue.unshift(...failed);this._status='error';}
+    else if(this._status==='syncing'){this._status='ok';}
+    this._flushing=false;this._updateDot();
   },
-  // Pull all data from Supabase and merge into memory
+  // Merge-aware pull — preserves locally dirty data instead of overwriting
+  _mergeArray(local,remote,table){
+    if(!remote||!remote.length)return local;
+    const dirtyIds=new Set([...this._dirty].filter(k=>k.startsWith(table+':')).map(k=>k.split(':')[1]));
+    const merged=new Map();
+    // Start with remote as base
+    remote.forEach(item=>merged.set(item.id,item));
+    // Overlay local dirty items (they haven't synced yet — keep local version)
+    local.forEach(item=>{
+      if(dirtyIds.has(item.id))merged.set(item.id,item);
+    });
+    return Array.from(merged.values());
+  },
   async pullAll(){
     if(!this.ready())return false;
     if(this._status==='saved')return false; // Don't pull until connection verified
+    if(this._flushing)return false; // Don't pull while flushing — avoid race
     this._status='syncing';this._updateDot();
     try{
       const [users,projects,notifs,intgs]=await Promise.all([
         this._get('studio_users'),this._get('studio_projects'),
         this._get('studio_notifications'),this._get('studio_integrations')
       ]);
-      let gotAny=false;
-      if(users&&users.length){_users=users;_tryLS(()=>localStorage.setItem('sv2_users',JSON.stringify(_users)));gotAny=true;}
-      if(projects){_projects=projects;_tryLS(()=>localStorage.setItem('sv2_projects',JSON.stringify(_projects)));gotAny=true;}
-      if(notifs){_notifs=notifs;_tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));}
-      if(intgs){_integrations=intgs;_tryLS(()=>localStorage.setItem('sv2_integrations',JSON.stringify(_integrations)));}
+      if(users&&users.length){_users=this._mergeArray(_users,users,'studio_users');_tryLS(()=>localStorage.setItem('sv2_users',JSON.stringify(_users)));}
+      if(projects){_projects=this._mergeArray(_projects,projects,'studio_projects');_tryLS(()=>localStorage.setItem('sv2_projects',JSON.stringify(_projects)));}
+      if(notifs){_notifs=this._mergeArray(_notifs,notifs,'studio_notifications');_tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));}
+      if(intgs){_integrations=this._mergeArray(_integrations,intgs,'studio_integrations');_tryLS(()=>localStorage.setItem('sv2_integrations',JSON.stringify(_integrations)));}
       const ld=await this._getLD();
       if(ld&&ld.length){_ldEntries=ld;_tryLS(()=>localStorage.setItem('sv2_ld',JSON.stringify(_ldEntries)));}
       this._status='ok';this._updateDot();
@@ -334,6 +374,7 @@ const SB={
   async initTables(){
     if(!this.ready())return{ok:false,msg:'Configure URL and key first'};
     const sql=`
+-- Core tables
 CREATE TABLE IF NOT EXISTS studio_users (
   id text PRIMARY KEY,
   data jsonb NOT NULL,
@@ -355,13 +396,47 @@ CREATE TABLE IF NOT EXISTS studio_integrations (
   data jsonb NOT NULL,
   updated_at timestamptz DEFAULT now()
 );
+
+-- Audit log table
+CREATE TABLE IF NOT EXISTS studio_audit_log (
+  id bigserial PRIMARY KEY,
+  event_type text NOT NULL,
+  user_id text,
+  user_role text,
+  target_id text,
+  detail text,
+  ip text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON studio_notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_updated ON studio_projects(updated_at DESC);
-ALTER TABLE studio_users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_projects DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_notifications DISABLE ROW LEVEL SECURITY;
-ALTER TABLE studio_integrations DISABLE ROW LEVEL SECURITY;
-GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integrations TO anon, authenticated;`.trim();
+CREATE INDEX IF NOT EXISTS idx_audit_created ON studio_audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON studio_audit_log(user_id);
+
+-- Enable Row-Level Security
+ALTER TABLE studio_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_integrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE studio_audit_log ENABLE ROW LEVEL SECURITY;
+
+-- Anon role: read-only access (writes go through authenticated server endpoints)
+CREATE POLICY IF NOT EXISTS "anon_read_users" ON studio_users FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_projects" ON studio_projects FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_notifs" ON studio_notifications FOR SELECT TO anon USING (true);
+CREATE POLICY IF NOT EXISTS "anon_read_integrations" ON studio_integrations FOR SELECT TO anon USING (true);
+
+-- Authenticated role: full access (server-side operations use service_role key)
+GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integrations, studio_audit_log TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE studio_audit_log_id_seq TO authenticated;
+
+-- Anon can read but NOT write (except audit log for logging)
+GRANT SELECT ON studio_users, studio_projects, studio_notifications, studio_integrations TO anon;
+GRANT INSERT ON studio_audit_log TO anon;
+CREATE POLICY IF NOT EXISTS "anon_insert_audit" ON studio_audit_log FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY IF NOT EXISTS "auth_all_audit" ON studio_audit_log FOR ALL TO authenticated USING (true);`.trim();
     try{
       const r=await fetch(this._url+'/rest/v1/rpc/exec_sql',{
         method:'POST',headers:{...this.headers(),'Content-Type':'application/json'},
@@ -375,40 +450,36 @@ GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integra
 
 // ══════════════════════════════════════
 // PERSISTENT IMAGE STORAGE — imgbb.com
-// Free, permanent, no CORS, no account needed
-// API key is shared/public (imgbb free tier, rate limited)
-// ══════════════════════════════════════
-const IMGBB_KEY = '2e46be4a490507c76db5a3db06b2e5b8'; // free public key
+// Audit logging — fire-and-forget to server
+function auditLog(event_type,detail,target_id){
+  try{fetch('/api/log',{method:'POST',headers:_authHeaders(),body:JSON.stringify({event_type,detail,target_id})}).catch(()=>{});}catch(e){}
+}
 
+// Session token header helper — include in all API calls for server-side auth
+function _authHeaders(extra){
+  const h={'Content-Type':'application/json',...(extra||{})};
+  const tk=_sessionToken||localStorage.getItem('sv2_token')||'';
+  if(tk)h['x-session-token']=tk;
+  return h;
+}
+
+// Persistent image storage via server-side proxy (API key kept server-side)
+// ══════════════════════════════════════
 async function persistImage(url){
-  // Takes any URL or base64 data URL, uploads to imgbb, returns permanent URL
-  // Returns original URL if upload fails (graceful fallback)
+  // Uploads image to imgbb via server proxy, returns permanent URL
+  // Falls back to original URL if upload fails
   try{
-    const form = new FormData();
-    if(url.startsWith('data:')){
-      // base64 data URL — extract the base64 part
-      form.append('image', url.split(',')[1]);
-    } else {
-      // External URL (e.g. fal.ai CDN) — fetch and re-upload
-      const resp = await fetch(url);
-      if(!resp.ok) return url; // fallback
-      const blob = await resp.blob();
-      const b64 = await new Promise(res => {
-        const r = new FileReader();
-        r.onload = e => res(e.target.result.split(',')[1]);
-        r.readAsDataURL(blob);
-      });
-      form.append('image', b64);
-    }
-    const r = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
-      method: 'POST', body: form
+    const r=await fetch('/api/imgbb',{
+      method:'POST',
+      headers:_authHeaders(),
+      body:JSON.stringify({image:url})
     });
-    if(!r.ok) return url;
-    const d = await r.json();
-    return d.data?.display_url || d.data?.url || url;
-  } catch(e) {
-    console.warn('imgbb upload failed:', e.message, '— using original URL');
-    return url; // graceful fallback — original URL still works short-term
+    if(!r.ok)return url;
+    const d=await r.json();
+    return d.url||url;
+  }catch(e){
+    console.warn('Image persist failed:',e.message,'— using original URL');
+    return url;
   }
 }
 
@@ -496,7 +567,7 @@ function gcid(){let id;do{id='CLI'+String(Math.floor(Math.random()*9000)+1000)}w
 function genProjectId(){
   const d=new Date();const ymd=String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
   const existing=DB.getProjects().map(p=>p.projectId||'').filter(x=>x.startsWith('STU-'+ymd));
-  const nums=existing.map(x=>parseInt(x.slice(-4))||0);
+  const nums=existing.map(x=>parseInt(x.slice(-4),10)||0);
   const next=nums.length?Math.max(...nums)+1:1;
   return 'STU-'+ymd+'-'+String(next).padStart(4,'0');
 }
@@ -549,6 +620,12 @@ function render(){
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
   setTimeout(()=>SB._updateDot(),60);
+  setTimeout(bindInboxNotifs,70);
+}
+// Bind inbox notification click events (safe from XSS — uses data attributes not inline onclick)
+function bindInboxNotifs(){
+  document.querySelectorAll('.inbox-notif').forEach(el=>el.addEventListener('click',()=>{clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype);render();}));
+  document.querySelectorAll('.inbox-notif-open').forEach(el=>el.addEventListener('click',(e)=>{e.stopPropagation();clickNotif(el.dataset.nid,el.dataset.pid);render();}));
 }
 
 function mainHTML(){
@@ -562,31 +639,137 @@ function mainHTML(){
 // LOGIN
 // ══════════════════════════════════════
 function loginHTML(){
-  return`<div class="login-wrap"><div class="login-box">
+  return`<div class="login-wrap">
+<div class="login-hero">
+  <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+  <div class="login-hero-content">
+    <div class="login-hero-logo">The <span>Studio</span></div>
+    <div class="login-hero-tagline">AI-powered media production.<br>From brief to final cut.</div>
+    <div class="login-hero-features">
+      <div class="login-hero-feature"><div class="login-hero-feature-icon orange">◈</div>Produce</div>
+      <div class="login-hero-feature"><div class="login-hero-feature-icon violet">✦</div>AI-Powered</div>
+      <div class="login-hero-feature"><div class="login-hero-feature-icon cyan">▶</div>Deliver</div>
+    </div>
+  </div>
+</div>
+<div class="login-form-panel"><div class="login-box">
 <div class="login-logo">The <span>Studio</span></div>
-<div class="login-sub">Media production platform — sign in to continue</div>
+<div class="login-sub">Sign in to your production workspace</div>
 <div class="login-err" id="lerr"></div>
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <div class="fg"><label>Password</label><input type="password" id="lpw" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <button class="btn btn-gold" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">Sign In →</button>
-<div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Default admin: <strong style="color:var(--t3)">admin</strong> / <strong style="color:var(--t3)">admin123</strong></div>
-</div></div>`;
+<div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Secure workspace — contact your admin for credentials</div>
+</div></div>
+</div>`;
 }
 
-function doLogin(){
+// Brute force protection
+let _loginAttempts=0,_loginLockUntil=0;
+let _sessionToken=null; // Server-signed session token
+function _showLoginErr(msg){const el=document.getElementById('lerr');if(el){el.style.display='block';el.textContent=msg;}}
+
+async function doLogin(){
+  const now=Date.now();
+  if(now<_loginLockUntil){_showLoginErr(`Too many attempts. Try again in ${Math.ceil((_loginLockUntil-now)/1000)}s.`);return;}
   const id=document.getElementById('lid').value.trim();
   const pw=document.getElementById('lpw').value.trim();
-  const u=DB.getUsers().find(u=>u.active!==false&&u.password===pw&&(u.email===id||u.clientId===id||u.username===id||u.name.toLowerCase()===id.toLowerCase()));
-  if(!u){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Invalid credentials. Please try again.';return}
-  S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';render();toast('Welcome, '+u.name+'!','ok');
+  if(!id||!pw){_showLoginErr('Enter both username and password.');return;}
+
+  // Try server-side auth first (PBKDF2 hashed, signed session)
+  try{
+    const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',identifier:id,password:pw})});
+    const d=await r.json();
+    if(d.ok&&d.token){
+      // Server auth succeeded
+      _loginAttempts=0;_loginLockUntil=0;
+      _sessionToken=d.token;
+      _tryLS(()=>localStorage.setItem('sv2_token',d.token));
+      S.session={userId:d.user.id,role:d.user.role,name:d.user.name};DB.setSession(S.session);
+      S.view=d.user.role;S.tab='dashboard';
+      if(d.forcePasswordChange){
+        render();showForceChangePwModal();return;
+      }
+      render();toast('Welcome, '+d.user.name+'!','ok');return;
+    }
+    if(d.fallback){
+      // Server auth not configured — fall through to client-side
+    }else{
+      // Server auth rejected
+      _loginAttempts++;
+      if(_loginAttempts>=10){_loginLockUntil=now+300000;_showLoginErr('Account locked for 5 minutes.');}
+      else if(_loginAttempts>=5){_loginLockUntil=now+30000;_showLoginErr('Too many attempts. Locked for 30 seconds.');}
+      else{_showLoginErr('Invalid credentials. ('+_loginAttempts+'/5)');}
+      return;
+    }
+  }catch(e){/* Server auth unavailable — fall through to client-side */}
+
+  // Fallback: client-side auth (for local development or when server auth not configured)
+  const u=DB.getUsers().find(u=>u.active!==false&&(u.password===pw||(u.passwordHash&&u.passwordSalt))&&(u.email===id||u.clientId===id||u.username===id||u.name.toLowerCase()===id.toLowerCase()));
+  if(!u||u.password!==pw){
+    _loginAttempts++;
+    if(_loginAttempts>=10){_loginLockUntil=now+300000;_showLoginErr('Account locked for 5 minutes.');}
+    else if(_loginAttempts>=5){_loginLockUntil=now+30000;_showLoginErr('Too many attempts. Locked for 30 seconds.');}
+    else{_showLoginErr('Invalid credentials. ('+_loginAttempts+'/5)');}
+    return;
+  }
+  if(u.active===false){_showLoginErr('Account is suspended. Contact your admin.');return;}
+  _loginAttempts=0;_loginLockUntil=0;
+  S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';
+  if(u.password==='admin123'&&u.role==='admin'){render();showForceChangePwModal();return;}
+  render();toast('Welcome, '+u.name+'!','ok');
 }
-function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashboard';S.pid=null;render()}
+
+function showForceChangePwModal(){
+  openModal(`<div class="modal-title">Change Default Password</div>
+<div class="ib ib-red"><strong>Security:</strong> You are using the default admin password. Please change it now.</div>
+<div class="fg"><label>New Password (min 8 characters)</label><input type="password" id="new-pw1" placeholder="Enter new password"/></div>
+<div class="fg"><label>Confirm Password</label><input type="password" id="new-pw2" placeholder="Confirm password"/></div>
+<div class="btn-row"><button class="btn btn-gold" onclick="forceChangePw()">Change Password</button></div>`);
+}
+
+async function forceChangePw(){
+  const p1=document.getElementById('new-pw1')?.value||'';const p2=document.getElementById('new-pw2')?.value||'';
+  if(p1.length<8){toast('Password must be at least 8 characters','err');return;}
+  if(p1!==p2){toast('Passwords do not match','err');return;}
+  // Try server-side password change
+  if(_sessionToken){
+    try{
+      const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'change-password',token:_sessionToken,newPassword:p1})});
+      const d=await r.json();if(d.ok){closeModal();toast('Password changed securely!','ok');return;}
+    }catch(e){}
+  }
+  // Fallback: client-side
+  const u=DB.getUser(S.session?.userId);if(!u)return;
+  u.password=p1;DB.saveUser(u);closeModal();toast('Password changed!','ok');
+}
+
+function doLogout(){
+  auditLog('logout','User signed out');
+  _sessionToken=null;_tryLS(()=>localStorage.removeItem('sv2_token'));
+  DB.clearSession();S.session=null;S.view='login';S.tab='dashboard';S.pid=null;render();
+}
 
 // ══════════════════════════════════════
 // APP BAR
 // ══════════════════════════════════════
 function appBarHTML(){
   const r=S.session?.role;
+  const _i=(d,s=16)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const NAV_ICONS={
+    dashboard:_i('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',14),
+    projects:_i('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',14),
+    timeline:_i('<line x1="2" y1="12" x2="22" y2="12"/><polyline points="16 6 22 12 16 18"/>',14),
+    clients:_i('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',14),
+    creators:_i('<circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',14),
+    integrations:_i('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',14),
+    ld:_i('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',14),
+    leads:_i('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',14),
+    settings:_i('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',14),
+    inbox:_i('<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',14),
+    new:_i('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',14),
+    assets:_i('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',14),
+  };
   const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
   const clientNav=[{k:'dashboard',l:'My Projects'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
@@ -598,10 +781,11 @@ function appBarHTML(){
 <span class="rb-${r}">${roleLabel}</span>
 <span class="app-bar-name">${S.session?.name}</span>
 <nav class="app-bar-nav">
-${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
+${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${NAV_ICONS[t.k]||''} ${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
 ${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
 </nav>
 <div class="app-bar-right">
+<div id="ai-engine-dot" class="ai-indicator" title="AI Engine: idle" style="cursor:help"></div>
 ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="goTab('settings')" title="API Keys: ${getKey('claude')?'✓ Claude':'✗ Claude'} · ${getKey('fal')?'✓ fal.ai':'✗ fal.ai'} · ${getKey('el')?'✓ ElevenLabs':'✗ ElevenLabs'}">
   <div style="display:flex;gap:4px;align-items:center">
     <span style="font-size:9px;color:var(--t3)">API Keys</span>
@@ -627,12 +811,14 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
 }
 
 function getKey(k){const u=DB.getUser(S.session?.userId);return u?.apiKeys?.[k]||''}
-function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:document.getElementById('k-c')?.value||'',fal:document.getElementById('k-f')?.value||'',el:document.getElementById('k-e')?.value||''};DB.saveUser(u);['c','f','e'].forEach((x,i)=>{const d=document.getElementById('kd'+x);const inp=document.getElementById('k-'+x);if(d)d.className='kdot'+(inp?.value?' ok':'');})}
+function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:document.getElementById('k-c')?.value||'',fal:document.getElementById('k-f')?.value||'',el:document.getElementById('k-e')?.value||''};auditLog('api_keys_updated','Admin updated API keys');DB.saveUser(u);['c','f','e'].forEach((x,i)=>{const d=document.getElementById('kd'+x);const inp=document.getElementById('k-'+x);if(d)d.className='kdot'+(inp?.value?' ok':'');})}
 // kC / kF / kE defined above near genProjectId
 function hasNotifs(){const uid=S.session?.userId;if(!uid)return false;return DB.getNotifs(uid).some(n=>!n.read);}
 function getUnreadCount(){const uid=S.session?.userId;if(!uid)return 0;return DB.getNotifs(uid).filter(n=>!n.read).length;}
 function toggleNotifPanel(){const p=document.getElementById('notif-panel');const uid=S.session?.userId;if(!p||!uid)return;const isOpen=p.style.display!=='none';p.style.display=isOpen?'none':'block';if(!isOpen){renderNotifList(uid);}}
-function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#110d00'}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}')"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');}
+function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div class="notif-item" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#0d0a14'}"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');
+  // Event delegation — safe from XSS (no inline onclick with unescaped IDs)
+  list.querySelectorAll('.notif-item').forEach(el=>el.addEventListener('click',()=>clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype)));}
 function clickNotif(nid,pid,type){
   DB.markNotifRead(nid);
   if(pid){
@@ -685,22 +871,51 @@ function adminDashboard(){
   const complete=flt.filter(p=>p.workflowStatus==='complete').length;
   const inProd=flt.filter(p=>['storyboard_in_progress','storyboard_review'].includes(p.workflowStatus)).length;
   const inSyn=flt.filter(p=>['brief_submitted','synopsis_review','synopsis_locked'].includes(p.workflowStatus)).length;
+  const hour=new Date().getHours();
+  const greeting=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   return`<div class="page">
-<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-<div><div class="page-title">Admin Dashboard</div><div class="page-sub">The Studio — complete overview</div></div>
-<div class="btn-row" style="margin-top:0">
-<button class="btn btn-gold" onclick="showRegModal('client')">+ Register Client</button>
-<button class="btn btn-outline" onclick="showRegModal('creator')">+ Add Creator</button>
-<button class="btn btn-ghost" onclick="showNewProjModal()">+ New Project</button>
-<button class="btn btn-blue" onclick="syncToSheets()">↑ Sync to Sheets</button>
-</div></div>
-<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:16px">
-${[{n:ps.length,l:'Total Projects',c:'var(--gold)',f:{},tab:'projects'},{n:clients.length,l:'Clients',c:'var(--purple)',f:{},tab:'clients'},{n:creators.length,l:'Creators',c:'var(--blue)',f:{},tab:'creators'},{n:needs.length,l:'Need Attention',c:'var(--red)',f:{},tab:'projects'},{n:complete,l:'Complete',c:'var(--green)',f:{status:'complete'},tab:'projects'},{n:inProd,l:'In Production',c:'#2ac09a',f:{status:'storyboard_in_progress'},tab:'projects'},{n:inSyn,l:'In Review',c:'#e06040',f:{status:'synopsis_review'},tab:'projects'}].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px 8px;text-align:center;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor='${s.c}33'" onmouseout="this.style.borderColor='var(--b1)'" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')"><div style="font-size:20px;font-weight:700;color:${s.c}">${s.n}</div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-top:2px;line-height:1.3">${s.l}</div></div>`).join('')}
+<div class="dash-hero">
+  <div class="dash-hero-bg"></div>
+  <div class="dash-hero-content">
+    <div class="dash-hero-text">
+      <div class="dash-hero-greeting">${greeting}, ${esc(S.session?.name||'Admin')}</div>
+      <div class="dash-hero-sub">${needs.length?`<span style="color:var(--gold)">${needs.length}</span> project${needs.length!==1?'s':''} need${needs.length===1?'s':''} your attention`:'All projects on track — looking great'}</div>
+    </div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn btn-gold" onclick="showRegModal('client')">+ Client</button>
+      <button class="btn btn-ai" onclick="showNewProjModal()">✦ New Project</button>
+      <button class="btn btn-ghost" onclick="showRegModal('creator')">+ Creator</button>
+      <button class="btn btn-ghost" onclick="syncToSheets()">↑ Sync</button>
+    </div>
+  </div>
+</div>
+<div class="dash-tiles">
+${(()=>{
+  // Calculate week-over-week deltas
+  const weekAgo=new Date(Date.now()-7*864e5);
+  const newThisWeek=ps.filter(p=>p.createdAt&&new Date(p.createdAt)>weekAgo).length;
+  const completedThisWeek=ps.filter(p=>p.workflowStatus==='complete'&&p.updatedAt&&new Date(p.updatedAt)>weekAgo).length;
+  const newClientsThisWeek=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>weekAgo).length;
+  function delta(n){return n>0?`<span style="color:var(--green);font-size:8px">+${n} this week</span>`:n<0?`<span style="color:var(--red);font-size:8px">${n} this week</span>`:''}
+  return[
+  {n:ps.length,d:delta(newThisWeek),l:'Total Projects',icon:'◈',grad:'var(--grad-hero)',f:{},tab:'projects'},
+  {n:clients.length,d:delta(newClientsThisWeek),l:'Clients',icon:'◉',grad:'var(--grad-ai)',f:{},tab:'clients'},
+  {n:creators.length,d:'',l:'Creators',icon:'✦',grad:'linear-gradient(135deg,#3B82F6,#06B6D4)',f:{},tab:'creators'},
+  {n:needs.length,d:needs.length?`<span style="color:var(--warning);font-size:8px">action needed</span>`:'',l:'Need Attention',icon:'⚡',grad:'linear-gradient(135deg,#EF4444,#FF6B35)',f:{},tab:'projects',glow:needs.length>0},
+  {n:complete,d:delta(completedThisWeek),l:'Complete',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'complete'},tab:'projects'},
+  {n:inProd,d:'',l:'In Production',icon:'▶',grad:'linear-gradient(135deg,#06B6D4,#8B5CF6)',f:{status:'storyboard_in_progress'},tab:'projects'},
+  {n:inSyn,d:'',l:'In Review',icon:'◎',grad:'linear-gradient(135deg,#F59E0B,#FF6B35)',f:{status:'synopsis_review'},tab:'projects'}
+].map(s=>`<div class="dash-tile${s.glow?' dash-tile-glow':''}" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')">
+  <div class="dash-tile-icon" style="background:${s.grad}">${s.icon}</div>
+  <div class="dash-tile-num" style="background:${s.grad};-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">${s.n}</div>
+  <div class="dash-tile-label">${s.l}</div>
+  ${s.d?`<div style="margin-top:4px">${s.d}</div>`:''}
+</div>`).join('');})()}
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
-<input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};render()" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
+<input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};debounceRender('dash')" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Creator</div>
 <select onchange="S.dashF={...S.dashF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(c=>`<option value="${c.id}"${df.creator===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -790,7 +1005,7 @@ function adminProjRow(p){
 <td><div style="display:flex;gap:4px">
 <button class="btn btn-ghost btn-sm" onclick="openStudio('${p.id}')">Open</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){DB.deleteProject('${p.id}');render()}">Del</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');render()}">Del</button>
 </div></td></tr>`;
 }
 
@@ -828,7 +1043,7 @@ function adminProjects(){
 
   const filterBar=`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input type="text" placeholder="Search name, ID, client…" value="${esc(df.q)}" oninput="S.projF={...S.projF||{},q:this.value};render()" style="flex:1;min-width:140px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
+<input type="text" placeholder="Search name, ID, client…" value="${esc(df.q)}" oninput="S.projF={...S.projF||{},q:this.value};debounceRender('proj')" style="flex:1;min-width:140px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
 <select onchange="S.projF={...S.projF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(cr=>`<option value="${cr.id}"${df.creator===cr.id?' selected':''}>${esc(cr.name)}</option>`).join('')}</select>
 <select onchange="S.projF={...S.projF||{},client:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
@@ -923,16 +1138,16 @@ function kanbanCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
   const now=new Date();const isOverdue=p.deadline&&new Date(p.deadline)<now&&p.workflowStatus!=='complete';
   const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-  const priColors={high:'#c04a4a',medium:'#B8960C',low:'#3a3a3a'};
+  const priColors={high:'#c04a4a',medium:'#FF6B35',low:'#3a3a3a'};
   const priLabels={high:'HIGH',medium:'MED',low:'LOW'};
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const unread=getUnreadCommentCount(p,S.session?.userId);
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(p.workflowStatus||'new')+1)/6*100);
-  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'#B8960C33':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
+  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
   onmouseover="this.style.borderColor='${accent}44';this.style.transform='translateY(-1px)'"
-  onmouseout="this.style.borderColor='${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'#B8960C33':'var(--b1)'}';this.style.transform=''"
+  onmouseout="this.style.borderColor='${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'}';this.style.transform=''"
   onclick="S.detailPid='${p.id}';S.tab='projects';render()">
 <!-- Type accent bar -->
 <div style="height:3px;background:${accent};opacity:0.8"></div>
@@ -958,7 +1173,7 @@ ${(p.tags||[]).length?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin:4p
 </div>
 <!-- Footer: deadline + badges + actions -->
 <div style="display:flex;justify-content:space-between;align-items:center">
-<span style="font-size:8px;color:${isOverdue?'var(--red)':isAtRisk?'#e0c070':'var(--t4)'}">${
+<span style="font-size:8px;color:${isOverdue?'var(--red)':isAtRisk?'#FF8A5C':'var(--t4)'}">${
   isOverdue?'⚠ Overdue':
   isAtRisk?'⚡ '+daysBetween(new Date().toISOString(),p.deadline)+'d left':
   p.deadline?'📅 '+new Date(p.deadline).toLocaleDateString():''
@@ -984,7 +1199,7 @@ ${projects.map(p=>{
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf)+1)/6*100);
-  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'#c04a4a33':alert?'#B8960C33':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
+  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'#c04a4a33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
 <div style="padding:12px 14px;border-bottom:1px solid var(--b1)">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:7px">
 <div style="font-size:16px">${mt?.icon||'?'}</div>
@@ -1039,7 +1254,7 @@ ${(p.comments||[]).length?`<div style="font-size:8px;color:var(--blue)">💬${p.
 <td onclick="event.stopPropagation()"><div style="display:flex;gap:3px">
 <button class="btn btn-ghost btn-sm" onclick="openStudio('${p.id}')">Open</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){DB.deleteProject('${p.id}');render()}">Del</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');render()}">Del</button>
 </div></td></tr>`;}).join('')}
 </tbody></table></div>`;
 }
@@ -1061,7 +1276,7 @@ function projDetailPage(p){
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 <span style="font-size:18px">${mt?.icon||'?'}</span>
 <div style="font-size:17px;font-weight:700;color:#fff">${esc(p.name)}</div>
-<code style="font-size:10px;color:var(--gold);background:#1a1000;border:1px solid #B8960C33;padding:2px 8px;border-radius:10px">${p.projectId||'—'}</code>
+<code style="font-size:10px;color:var(--gold);background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);padding:2px 8px;border-radius:10px">${p.projectId||'—'}</code>
 ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH</span>',low:'<span style="font-size:9px;color:var(--t4)">○ LOW</span>'}[p.priority||'']||''}
 </div>
 </div>
@@ -1069,18 +1284,18 @@ ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH<
 <button class="btn btn-gold" onclick="openStudio('${p.id}')">Open Studio →</button>
 <button class="btn btn-outline btn-sm" onclick="showEditProjModal('${p.id}')">Edit</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
-<button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
+<button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
 </div></div>
 
 ${isOverdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(p.deadline)} days overdue.</strong> Deadline was ${new Date(p.deadline).toLocaleDateString()}.</div>`:''}
-${atRisk?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#e0c070">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
+${atRisk?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#FF8A5C">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
 
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
 ${[
   {l:'Status',v:wf.replace(/_/g,' '),c:wf==='complete'?'var(--green)':wf.includes('review')?'var(--gold)':'var(--t2)'},
   {l:'Progress',v:progress+'%',c:'var(--green)'},
   {l:'Priority',v:(p.priority||'medium').toUpperCase(),c:{high:'var(--red)',medium:'var(--gold)',low:'var(--t4)'}[p.priority||'medium']},
-  {l:'Deadline',v:p.deadline?new Date(p.deadline).toLocaleDateString():'Not set',c:isOverdue?'var(--red)':atRisk?'#e0c070':'var(--t3)'},
+  {l:'Deadline',v:p.deadline?new Date(p.deadline).toLocaleDateString():'Not set',c:isOverdue?'var(--red)':atRisk?'#FF8A5C':'var(--t3)'},
 ].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;text-align:center">
 <div style="font-size:15px;font-weight:700;color:${s.c}">${s.v}</div>
 <div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-top:3px">${s.l}</div></div>`).join('')}
@@ -1221,7 +1436,7 @@ function adminClients(){
   return`<tr>
 <td><div class="urow"><div class="uav uav-client">${(c.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
 <td><code style="color:var(--purple);font-size:10px">${c.clientId||'—'}</code></td>
-<td><code style="color:var(--t4);font-size:10px">${c.password}</code></td>
+<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${pcount}</span></td>
 <td><span style="font-size:10px;color:${emp?'var(--blue)':'var(--t4)'}">${emp?esc(emp.name):'Unassigned'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
@@ -1235,27 +1450,55 @@ function adminClients(){
 
 function adminCreators(){
   const emps=DB.getUsers().filter(u=>u.role==='creator');
+  const ps=DB.getProjects();
+  const typeColors={commercial_ad:'#FF6B35',short_film:'#8B5CF6',youtube_explainer:'#EF4444',podcast:'#3B82F6',product_video:'#06B6D4',testimonial:'#10B981',influencer_ugc:'#EC4899',music_video:'#F59E0B',design:'#06B6D4'};
+  const maxProjects=5; // capacity bar max
   return`<div class="page">
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
 <div><div class="page-title">Creators</div><div class="page-sub">${emps.length} registered</div></div>
 <button class="btn btn-gold" onclick="showRegModal('creator')">+ Add Creator</button>
 </div>
-<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Creator</th><th>Username</th><th>Password</th><th>Assigned Clients</th><th>Status</th><th>Actions</th></tr></thead>
-<tbody>${emps.length?emps.map(e=>{
-  const assigned=(e.assignedClients||[]).map(cid=>DB.getUser(cid)?.name||cid).join(', ')||'None';
-  return`<tr>
-<td><div class="urow"><div class="uav uav-creator">${(e.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.email||'')}</div></div></div></td>
-<td><code style="color:var(--blue);font-size:10px">${esc(e.username||e.name)}</code></td>
-<td><code style="color:var(--t4);font-size:10px">${e.password}</code></td>
-<td><span style="font-size:10px;color:var(--t3)">${assigned}</span></td>
-<td><span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span></td>
-<td><div style="display:flex;gap:4px">
-<button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
-<button class="btn btn-blue btn-sm" onclick="showAssignClientsModal('${e.id}')">Assign Clients</button>
-<button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Deactivate':'Activate'}</button>
-</div></td></tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:20px">No creators yet</td></tr>'}</tbody></table>
-</div></div>`;
+${emps.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+${emps.map(e=>{
+  const activeProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus!=='complete');
+  const completedProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus==='complete');
+  const assignedClients=(e.assignedClients||[]).map(cid=>DB.getUser(cid)).filter(Boolean);
+  const workload=activeProjects.length;
+  const pct=Math.min(100,Math.round((workload/maxProjects)*100));
+  const wColor=pct>=80?'var(--red)':pct>=50?'var(--gold)':'var(--green)';
+  // Detect specialities from project types
+  const specialities=[...new Set(ps.filter(p=>p.assignedCreatorId===e.id).map(p=>p.type).filter(Boolean))];
+  return`<div style="background:var(--glass-bg);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-radius:var(--r2);overflow:hidden;transition:border-color .2s,transform .2s" onmouseover="this.style.borderColor='rgba(255,255,255,0.15)';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--glass-border)';this.style.transform=''">
+<div style="padding:16px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--b1)">
+  <div class="uav uav-creator" style="width:40px;height:40px;font-size:14px">${(e.name[0]||'?').toUpperCase()}</div>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:14px;font-weight:700;color:var(--t1)">${esc(e.name)}</div>
+    <div style="font-size:10px;color:var(--t4)">${esc(e.username||e.name)} · ${esc(e.email||'')}</div>
+  </div>
+  <span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span>
+</div>
+<div style="padding:14px 18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700;letter-spacing:.06em">Workload</span>
+    <span style="font-size:10px;color:${wColor};font-weight:700">${workload}/${maxProjects} active</span>
+  </div>
+  <div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden;margin-bottom:12px">
+    <div style="height:100%;width:${pct}%;background:${wColor};border-radius:2px;transition:width .3s"></div>
+  </div>
+  ${specialities.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">${specialities.slice(0,4).map(t=>`<span style="font-size:8px;padding:2px 7px;border-radius:8px;background:${(typeColors[t]||'var(--t4)')}18;color:${typeColors[t]||'var(--t4)'};border:1px solid ${(typeColors[t]||'var(--t4)')}33;font-weight:600">${MT[t]?.label||t}</span>`).join('')}</div>`:''}
+  <div style="display:flex;gap:8px;font-size:10px;color:var(--t3);margin-bottom:12px">
+    <span>${assignedClients.length} client${assignedClients.length!==1?'s':''}</span>
+    <span>·</span>
+    <span>${completedProjects.length} completed</span>
+  </div>
+  <div style="display:flex;gap:4px">
+    <button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
+    <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
+    <button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Off':'On'}</button>
+  </div>
+</div></div>`;}).join('')}
+</div>`:`<div style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No creators yet</div><div style="font-size:10px;color:var(--t4)">Add your first creator to start assigning projects</div></div>`}
+</div>`;
 }
 
 const INTEGRATION_PRESETS=[
@@ -1310,8 +1553,8 @@ ${intg.notes?`<div style="font-size:9px;color:var(--t3);margin-bottom:6px">${esc
 </div>`:''}
 <div class="section-lbl">Add from Presets</div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat==='all'?'#1a1000':'var(--bg3)'};color:${selCat==='all'?'var(--gold)':'var(--t4)'};border:1px solid ${selCat==='all'?'#B8960C44':'var(--b1)'}" onclick="S.intCat='all';render()">All</div>
-${cats.map(cat=>`<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat===cat?'#1a1000':'var(--bg3)'};color:${selCat===cat?'var(--gold)':'var(--t4)'};border:1px solid ${selCat===cat?'#B8960C44':'var(--b1)'}" onclick="S.intCat='${cat}';render()">${cat}</div>`).join('')}
+<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat==='all'?'#1a0f1e':'var(--bg3)'};color:${selCat==='all'?'var(--gold)':'var(--t4)'};border:1px solid ${selCat==='all'?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.intCat='all';render()">All</div>
+${cats.map(cat=>`<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat===cat?'#1a0f1e':'var(--bg3)'};color:${selCat===cat?'var(--gold)':'var(--t4)'};border:1px solid ${selCat===cat?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.intCat='${cat}';render()">${cat}</div>`).join('')}
 </div>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px">
 ${INTEGRATION_PRESETS.filter(p=>selCat==='all'||p.cat===selCat).map(preset=>{const already=intgs.find(x=>x.name===preset.name);return`<div style="background:var(--bg2);border:1px solid ${already?'#4ac04a22':'var(--b1)'};border-radius:7px;padding:10px">
@@ -1377,7 +1620,7 @@ function sComments(p){
   const topLevel=comments.filter(cm=>!cm.replyTo);
   const repliesFor=id=>comments.filter(cm=>cm.replyTo===id);
   const roleColor={admin:'var(--gold)',creator:'var(--blue)'};
-  const avatarBg={admin:'#1a1000',creator:'#050d18'};
+  const avatarBg={admin:'#1a0f1e',creator:'#0a0a18'};
 
   function renderComment(cm,isReply){
     const isOwn=cm.authorId===uid;
@@ -1522,7 +1765,7 @@ function copyCommentLink(cmId){
 // ══════════════════════════════════════
 const WF_STAGES=[
   {id:'new',label:'Created',color:'#3a3a3a',short:'New'},
-  {id:'brief_submitted',label:'Brief',color:'#B8960C',short:'Brief'},
+  {id:'brief_submitted',label:'Brief',color:'#FF6B35',short:'Brief'},
   {id:'synopsis_review',label:'Synopsis',color:'#4a8fc0',short:'Synopsis'},
   {id:'synopsis_locked',label:'Approved',color:'#2ac09a',short:'Approved'},
   {id:'storyboard_in_progress',label:'Storyboard',color:'#8a6fd4',short:'Board'},
@@ -1575,7 +1818,7 @@ function sProjectTimeline(p){
 ${[
   {l:'Days Active',v:totalDays+'d',c:'var(--gold)'},
   {l:'Current Stage',v:stageLabel(p.workflowStatus||'new'),c:stageColor(p.workflowStatus||'new')},
-  {l:'Deadline',v:deadline?new Date(deadline).toLocaleDateString():'Not set',c:overdue?'var(--red)':atRisk?'#e0c070':'var(--t3)'},
+  {l:'Deadline',v:deadline?new Date(deadline).toLocaleDateString():'Not set',c:overdue?'var(--red)':atRisk?'#FF8A5C':'var(--t3)'},
   {l:'Progress',v:progress+'%',c:'var(--green)'},
 ].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;text-align:center">
 <div style="font-size:20px;font-weight:700;color:${s.c}">${s.v}</div>
@@ -1583,7 +1826,7 @@ ${[
 </div>
 
 ${overdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(deadline)} days overdue.</strong> Deadline was ${new Date(deadline).toLocaleDateString()}.</div>`:''}
-${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#e0c070">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
+${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#FF8A5C">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
 
 <div style="margin-bottom:18px">
 <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t4);margin-bottom:5px">
@@ -1614,7 +1857,7 @@ ${seg.isActive?`<span style="font-size:8px;background:${seg.color}22;color:${seg
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
 <input type="date" id="ph-deadline" value="${p.deadline||''}" style="background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:7px 10px;border-radius:5px;font-size:11px" onchange="saveInputs()"/>
 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ph-deadline').value='';saveInputs()">Clear</button>
-${deadline?`<span style="font-size:10px;color:${overdue?'var(--red)':atRisk?'#e0c070':'var(--green)'}">${overdue?'⚠ Overdue by '+daysFrom(deadline)+'d':atRisk?'⚡ '+daysBetween(now,deadline)+'d remaining':'✓ '+daysBetween(now,deadline)+'d remaining'}</span>`:''}
+${deadline?`<span style="font-size:10px;color:${overdue?'var(--red)':atRisk?'#FF8A5C':'var(--green)'}">${overdue?'⚠ Overdue by '+daysFrom(deadline)+'d':atRisk?'⚡ '+daysBetween(now,deadline)+'d remaining':'✓ '+daysBetween(now,deadline)+'d remaining'}</span>`:''}
 </div>`;
 }
 
@@ -1688,14 +1931,17 @@ function adminTimeline(){
     const history=p.stageHistory||[{stage:p.workflowStatus||'new',enteredAt:created}];
     const isOverdue=p.deadline&&new Date(p.deadline)<now;
     const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-    const rowBg=i%2===0?'transparent':'#ffffff04';
+    const rowBg=isOverdue?'rgba(239,68,68,0.04)':i%2===0?'#0A0A12':'#12121E';
     const cl=DB.getUser(p.clientId);
     const cr=DB.getUser(p.assignedCreatorId);
 
     rows+=`<rect x="0" y="${y}" width="${LABEL_W+CHART_W}" height="${ROW_H}" fill="${rowBg}"/>`;
+    // Overdue left border indicator
+    if(isOverdue)rows+=`<rect x="0" y="${y}" width="3" height="${ROW_H}" fill="#EF4444" opacity="0.8"/>`;
+    else if(isAtRisk)rows+=`<rect x="0" y="${y}" width="3" height="${ROW_H}" fill="#FF6B35" opacity="0.5"/>`;
 
     // Label area
-    rows+=`<text x="8" y="${y+14}" fill="${isOverdue?'#e07a7a':'#e0e0e0'}" font-size="10" font-weight="700" font-family="Arial,sans-serif" style="cursor:pointer" onclick="openStudio('${p.id}')">${esc(p.name.substring(0,26)+(p.name.length>26?'…':''))}</text>`;
+    rows+=`<text x="8" y="${y+14}" fill="${isOverdue?'#F87171':'#F0F0FF'}" font-size="10" font-weight="700" font-family="Arial,sans-serif" style="cursor:pointer" onclick="openStudio('${p.id}')">${esc(p.name.substring(0,26)+(p.name.length>26?'…':''))}</text>`;
     rows+=`<text x="8" y="${y+26}" fill="${isOverdue?'#c04a4a':'#666'}" font-size="8" font-family="Arial,sans-serif">${p.projectId||'—'} · ${cl?esc(cl.name.substring(0,14)):'No client'}</text>`;
     rows+=`<text x="8" y="${y+36}" fill="${stageColor(p.workflowStatus||'new')}" font-size="8" font-family="Arial,sans-serif" font-weight="700">${stageLabel(p.workflowStatus||'new').toUpperCase()}</text>`;
 
@@ -1720,7 +1966,8 @@ function adminTimeline(){
       const x2=clampX(dateToX(endTime));
       if(x2<=x1+1)continue;
       const barY=y+8;const barH=ROW_H-18;
-      rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="3" fill="${stageColor(stage)}" opacity="${p.workflowStatus===stage?'0.9':'0.5'}" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
+      rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="${barH/2}" fill="${stageColor(stage)}" opacity="${p.workflowStatus===stage?'0.9':'0.45'}" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
+      if(p.workflowStatus===stage)rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="${barH/2}" fill="${stageColor(stage)}" opacity="0.15" filter="blur(4px)" style="pointer-events:none"/>`;  // active glow
       if(x2-x1>30){rows+=`<text x="${(x1+x2)/2}" y="${barY+barH/2+4}" text-anchor="middle" fill="#fff" font-size="7" font-family="Arial,sans-serif" opacity="0.9" style="pointer-events:none">${WF_STAGES.find(s=>s.id===stage)?.short||''}</text>`;}
       drewBar=true;
     }
@@ -1738,7 +1985,7 @@ function adminTimeline(){
       const dx=dateToX(p.deadline);
       if(dx>LABEL_W+PAD&&dx<LABEL_W+CHART_W-PAD){
         const dy=y+ROW_H/2;const ds=7;
-        const col=isOverdue?'#c04a4a':isAtRisk?'#e0a020':'#4ac04a';
+        const col=isOverdue?'#EF4444':isAtRisk?'#F59E0B':'#10B981';
         rows+=`<polygon points="${dx},${dy-ds} ${dx+ds},${dy} ${dx},${dy+ds} ${dx-ds},${dy}" fill="${col}" opacity="0.9" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
       }
     }
@@ -1754,13 +2001,13 @@ function adminTimeline(){
 </div></div>
 
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:9px 12px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input type="text" placeholder="Search..." value="${esc(gf.q)}" oninput="S.tlFilter={...S.tlFilter||{},q:this.value};render()" style="flex:1;min-width:120px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
+<input type="text" placeholder="Search..." value="${esc(gf.q)}" oninput="S.tlFilter={...S.tlFilter||{},q:this.value};debounceRender('tl')" style="flex:1;min-width:120px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
 <select onchange="S.tlFilter={...S.tlFilter||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(cr=>`<option value="${cr.id}"${gf.creator===cr.id?' selected':''}>${esc(cr.name)}</option>`).join('')}</select>
 <select onchange="S.tlFilter={...S.tlFilter||{},status:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Stages</option>${WF_STAGES.map(s=>`<option value="${s.id}"${gf.status===s.id?' selected':''}>${s.label}</option>`).join('')}</select>
 <span style="font-size:9px;color:var(--t4)">View:</span>
-${[14,30,60,90].map(d=>`<div style="padding:3px 8px;border-radius:8px;font-size:9px;font-weight:700;cursor:pointer;background:${(S.tlRange||60)===d?'#1a1000':'var(--bg3)'};color:${(S.tlRange||60)===d?'var(--gold)':'var(--t4)'};border:1px solid ${(S.tlRange||60)===d?'#B8960C44':'var(--b1)'}" onclick="S.tlRange=${d};S.tlOffset=0;render()">${d}d</div>`).join('')}
+${[14,30,60,90].map(d=>`<div style="padding:3px 8px;border-radius:8px;font-size:9px;font-weight:700;cursor:pointer;background:${(S.tlRange||60)===d?'#1a0f1e':'var(--bg3)'};color:${(S.tlRange||60)===d?'var(--gold)':'var(--t4)'};border:1px solid ${(S.tlRange||60)===d?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.tlRange=${d};S.tlOffset=0;render()">${d}d</div>`).join('')}
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=(S.tlOffset||0)-(S.tlRange||60)*0.4;render()">‹ Earlier</button>
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=Math.min(0,(S.tlOffset||0)+(S.tlRange||60)*0.4);render()">Later ›</button>
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=0;render()">Today</button>
@@ -1771,7 +2018,7 @@ ${WF_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:4px;font-siz
 <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:var(--t3);margin-left:8px"><div style="width:10px;height:10px;background:#4ac04a;clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%)"></div>Deadline</div>
 <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:var(--t3)"><div style="width:1px;height:12px;background:var(--red)"></div>Today</div>
 ${ps.filter(p=>p.deadline&&new Date(p.deadline)<now).length?`<span style="margin-left:8px;font-size:9px;color:var(--red);font-weight:700">⚠ ${ps.filter(p=>p.deadline&&new Date(p.deadline)<now).length} overdue</span>`:''}
-${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length?`<span style="font-size:9px;color:#e0c070;font-weight:700">⚡ ${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length} due this week</span>`:''}
+${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length?`<span style="font-size:9px;color:#FF8A5C;font-weight:700">⚡ ${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length} due this week</span>`:''}
 </div>
 
 ${filtered.length===0?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:40px;text-align:center;color:var(--t4)">No projects match the filter.</div>`:`
@@ -1793,8 +2040,10 @@ ${weekTicks.filter(t=>t.label).map(t=>`<text x="${t.x+3}" y="32" fill="#333" fon
 <!-- Rows -->
 ${rows}
 <!-- Today line (on top) -->
-<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#c04a4a" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.8"/>
-<text x="${todayX+3}" y="48" fill="#c04a4a" font-size="8" font-family="Arial,sans-serif" font-weight="700">TODAY</text>
+<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#06B6D4" stroke-width="2.5" opacity="0.9"/>
+<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#06B6D4" stroke-width="8" opacity="0.12"/>
+<rect x="${todayX-14}" y="38" width="28" height="13" rx="3" fill="#06B6D4" opacity="0.9"/>
+<text x="${todayX}" y="48" text-anchor="middle" fill="#000" font-size="7" font-family="Arial,sans-serif" font-weight="800">TODAY</text>
 <!-- Bottom border -->
 <line x1="0" y1="${totalH-1}" x2="${LABEL_W+CHART_W}" y2="${totalH-1}" stroke="#1e1e1e" stroke-width="1"/>
 </svg>
@@ -1880,7 +2129,7 @@ function trendingStylesPanel(p){
   const selected=S.selectedTrends||[];
   const typeColors={trend:'var(--gold)',skill:'var(--blue)',creator:'var(--purple)',workflow:'var(--green)'};
   const typeIcons={trend:'📈',skill:'🎯',creator:'👁',workflow:'⚙'};
-  return`<div style="background:#080a00;border:1px solid #B8960C44;border-radius:9px;padding:13px;margin-bottom:14px">
+  return`<div style="background:#0e0a18;border:1px solid rgba(255,107,53,0.25);border-radius:9px;padding:13px;margin-bottom:14px">
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
 <div style="display:flex;align-items:center;gap:7px">
 <span style="font-size:14px">✦</span>
@@ -1950,12 +2199,12 @@ ${['trend','skill','creator','workflow'].map(t=>`<div style="background:var(--bg
 
 <!-- Filter -->
 <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
-<input type="text" placeholder="Search…" value="${esc(ldFilter.q)}" oninput="S.ldFilter={...S.ldFilter,q:this.value};render()" style="flex:1;min-width:150px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:6px 9px;border-radius:5px;font-size:10px"/>
+<input type="text" placeholder="Search…" value="${esc(ldFilter.q)}" oninput="S.ldFilter={...S.ldFilter,q:this.value};debounceRender('ld')" style="flex:1;min-width:150px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:6px 9px;border-radius:5px;font-size:10px"/>
 ${['','trend','skill','creator','workflow'].map(t=>`<button onclick="S.ldFilter={...S.ldFilter,type:'${t}'};render()" style="background:${ldFilter.type===t?'var(--bg2)':'var(--bg3)'};border:1px solid ${ldFilter.type===t?'var(--gold)':'var(--b2)'};color:${ldFilter.type===t?'var(--gold)':'var(--t4)'};padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px">${t||'All'}</button>`).join('')}
 </div>
 
 <!-- Trend Agent status -->
-<div id="ld-agent-status" style="display:none;background:#080a00;border:1px solid #B8960C33;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--gold)"></div>
+<div id="ld-agent-status" style="display:none;background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--gold)"></div>
 
 <!-- Entries grid -->
 ${filtered.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
@@ -2249,7 +2498,7 @@ async function ldRefImagesSelected(input){
 
 // Upload file to fal.ai storage and return CDN URL
 async function uploadFileToFal(file){
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  const k=kF(); // may be empty — server proxy has FAL_KEY
   // Step 1: get upload URL from fal.ai
   const initResp=await falFetch('https://rest.fal.run/storage/upload/initiate',{
     method:'POST',
@@ -2302,9 +2551,10 @@ async function extractLDStyle(id){
   }
   if(url){
     try{
+      const _ck=kC();const _ch=_authHeaders({'anthropic-version':'2023-06-01'});if(_ck)_ch['x-api-key']=_ck;
       const resp=await fetch('/api/claude',{
         method:'POST',
-        headers:{'x-api-key':kC(),'anthropic-version':'2023-06-01','Content-Type':'application/json'},
+        headers:_ch,
         body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,messages:[{role:'user',content:'Fetch and summarise this URL content for visual style extraction: '+url+'. If you cannot access it, describe the expected content style based on the URL.'}]})
       });
       const d=await resp.json();
@@ -2369,7 +2619,7 @@ async function startLoRATraining(id){
   const urls=document.getElementById('lora-urls')?.value.trim().split('\n').map(u=>u.trim()).filter(u=>u.startsWith('http'));
   if(urls.length<3){toast('Add at least 3 image URLs','err');return;}
   const trigger=document.getElementById('lora-trigger')?.value.trim()||'custom_style';
-  const steps=parseInt(document.getElementById('lora-steps')?.value)||1000;
+  const steps=parseInt(document.getElementById('lora-steps')?.value,10)||1000;
   const statusEl=document.getElementById('lora-status');
   if(statusEl){statusEl.style.display='block';statusEl.textContent='Submitting training job to fal.ai…';}
   try{
@@ -2418,7 +2668,7 @@ function adminSettings(){
   const sbUrl=localStorage.getItem('sb_url')||'';
   const sbKey=localStorage.getItem('sb_key')||'';
   const sbStatus=SB._status;
-  const sbStatusColor={ok:'var(--green)',error:'var(--red)',syncing:'#e0c070',unconfigured:'var(--t4)',saved:'var(--gold)'}[sbStatus]||'var(--t4)';
+  const sbStatusColor={ok:'var(--green)',error:'var(--red)',syncing:'#FF8A5C',unconfigured:'var(--t4)',saved:'var(--gold)'}[sbStatus]||'var(--t4)';
   const sbStatusLabel={ok:'Connected ✓',error:'Error — check URL/key',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — click Test Connection'}[sbStatus]||sbStatus;
   return`<div class="page"><div class="page-title">Settings</div><div class="page-sub">API keys, database, and account management — admin only</div>
 ${(()=>{
@@ -2445,7 +2695,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="form2">
 <div class="fg"><label>Supabase Project URL</label><input type="text" id="sb-url-inp" value="${esc(sbUrl)}" placeholder="https://xxxx.supabase.co"/></div>
 <div class="fg"><label>Supabase Anon Key <span style="font-size:8px;color:var(--t4);font-weight:400">(Settings → API → anon public — starts with eyJ, ~200 chars)</span></label>
-<input type="text" id="sb-key-inp" value="${esc(sbKey)}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." oninput="sbKeyHint(this)"/>
+<div style="display:flex;gap:4px;align-items:center"><input type="password" id="sb-key-inp" value="${esc(sbKey)}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." oninput="sbKeyHint(this)" style="flex:1"/><button onclick="const i=document.getElementById('sb-key-inp');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'👁‍🗨'" style="background:none;border:1px solid var(--b2);border-radius:var(--r);cursor:pointer;font-size:13px;padding:6px 8px;color:var(--t3)">👁</button></div>
 <div id="sb-key-hint" style="font-size:9px;margin-top:3px;color:${sbKey.startsWith('eyJ')&&sbKey.length>100?'var(--green)':'var(--t4)'}">${sbKey?sbKey.startsWith('eyJ')&&sbKey.length>100?'✓ Key format looks correct ('+sbKey.length+' chars)':'⚠ Should start with eyJ and be ~200+ chars (currently '+sbKey.length+')':'Paste from Supabase Dashboard → Settings → API → Project API keys → anon public'}</div>
 </div>
 </div>
@@ -2471,10 +2721,11 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">🔑 API KEYS</span></div><div class="card-body">
 <div class="ib ib-red" style="margin-bottom:10px"><strong>Admin-only.</strong> These keys power all AI generation for every user.</div>
 <div class="form3">
-<div class="fg"><label>Anthropic (Claude)</label><input type="text" id="k-c" value="${kC()}" placeholder="sk-ant-..." oninput="saveKeys()"/></div>
-<div class="fg"><label>fal.ai</label><input type="text" id="k-f" value="${kF()}" placeholder="fal-key-..." oninput="saveKeys()"/></div>
-<div class="fg"><label>ElevenLabs</label><input type="text" id="k-e" value="${kE()}" placeholder="el-api-key..." oninput="saveKeys()"/></div>
+<div class="fg"><label>Anthropic (Claude)</label><input type="password" id="k-c" value="${kC()}" placeholder="sk-ant-..." oninput="saveKeys()"/></div>
+<div class="fg"><label>fal.ai</label><input type="password" id="k-f" value="${kF()}" placeholder="fal-key-..." oninput="saveKeys()"/></div>
+<div class="fg"><label>ElevenLabs</label><input type="password" id="k-e" value="${kE()}" placeholder="el-api-key..." oninput="saveKeys()"/></div>
 </div>
+<div style="margin-bottom:8px"><button onclick="['k-c','k-f','k-e'].forEach(id=>{const i=document.getElementById(id);if(i)i.type=i.type==='password'?'text':'password'});this.textContent=document.getElementById('k-c')?.type==='password'?'👁 Show keys':'👁‍🗨 Hide keys'" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--t4)">👁 Show keys</button></div>
 <button class="btn btn-green" onclick="saveKeys();toast('Keys saved!','ok')">✓ Save API Keys</button>
 </div></div>
 
@@ -2492,7 +2743,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="card"><div class="card-head"><span class="card-title">👤 ADMIN ACCOUNT</span></div><div class="card-body">
 <div class="form2">
 <div class="fg"><label>Admin Name</label><input type="text" id="admin-name" value="${esc(u.name||'Admin')}"/></div>
-<div class="fg"><label>Admin Password</label><input type="text" id="admin-pw" value="${esc(u.password||'')}"/></div>
+<div class="fg"><label>Admin Password</label><input type="password" id="admin-pw" value="${esc(u.password||'')}"/></div>
 </div>
 <button class="btn btn-gold" onclick="saveAdminAccount()">Save Account</button>
 </div></div>
@@ -2517,7 +2768,7 @@ function sbKeyHint(inp){
   const v=inp.value.trim();const el=document.getElementById('sb-key-hint');if(!el)return;
   if(!v){el.style.color='var(--t4)';el.textContent='Paste from Supabase Dashboard → Settings → API → anon public';return;}
   if(!v.startsWith('eyJ')){el.style.color='var(--red)';el.textContent='✗ Should start with eyJ — this looks like the wrong value';return;}
-  if(v.length<100){el.style.color='#e0c070';el.textContent='⚠ Key seems short ('+v.length+' chars) — the real anon key is ~200 chars';return;}
+  if(v.length<100){el.style.color='#FF8A5C';el.textContent='⚠ Key seems short ('+v.length+' chars) — the real anon key is ~200 chars';return;}
   el.style.color='var(--green)';el.textContent='✓ Key format looks correct ('+v.length+' chars)';
 }
 async function sbTest(){
@@ -2651,8 +2902,8 @@ function adminLeads(){
   function statusBadge(s){const map={pending:'var(--gold)',contacted:'var(--blue)',converted:'var(--green)',closed:'var(--t4)'};return`<span style="font-size:8px;background:${(map[s]||'var(--t4)')}22;color:${map[s]||'var(--t4)'};border:1px solid ${(map[s]||'var(--t4)')}44;padding:2px 7px;border-radius:8px;text-transform:uppercase;font-weight:700">${s||'pending'}</span>`;}
   function fmtDate(d){if(!d)return'—';const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}
   function demoRows(){
-    if(!demos)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
-    if(!demos.length)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No demo requests yet</td></tr>`;
+    if(!demos)return`<tr><td colspan="8" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">◈</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No demo data loaded yet</div><div style="font-size:10px;color:var(--t4);margin-bottom:14px">Click <strong style="color:var(--gold)">Refresh</strong> to pull the latest leads from your website</div><button class="btn btn-outline btn-sm" onclick="leadsRefresh()">↓ Load Demos</button></td></tr>`;
+    if(!demos.length)return`<tr><td colspan="8" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No demo requests yet</div><div style="font-size:10px;color:var(--t4)">Your next client is on their way — demos will appear here automatically</div></td></tr>`;
     return demos.map((d,i)=>`<tr>
 <td style="font-size:10px;color:#fff;font-weight:600">${esc(d.name||'—')}</td>
 <td style="font-size:9px;color:var(--t3)">${esc(d.email||'—')}</td>
@@ -2669,8 +2920,8 @@ function adminLeads(){
 </tr>`).join('');
   }
   function enqRows(){
-    if(!enqs)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
-    if(!enqs.length)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No enquiries yet</td></tr>`;
+    if(!enqs)return`<tr><td colspan="7" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">◈</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No enquiry data loaded yet</div><div style="font-size:10px;color:var(--t4);margin-bottom:14px">Click <strong style="color:var(--gold)">Refresh</strong> to pull the latest enquiries</div><button class="btn btn-outline btn-sm" onclick="leadsRefresh()">↓ Load Enquiries</button></td></tr>`;
+    if(!enqs.length)return`<tr><td colspan="7" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No enquiries yet</div><div style="font-size:10px;color:var(--t4)">Enquiries from your website will appear here when they come in</div></td></tr>`;
     return enqs.map((e,i)=>`<tr>
 <td style="font-size:10px;color:#fff;font-weight:600">${esc(e.name||'—')}</td>
 <td style="font-size:9px;color:var(--t3)">${esc(e.email||'—')}</td>
@@ -2807,12 +3058,12 @@ function doPost(e) {
 
 function exportUsersCSV(role){
   const us=DB.getUsers().filter(u=>u.role===role);
-  const rows=role==='client'?[['Client ID','Name','Email','Password','Projects','Status']]:
-    [['Username','Name','Email','Password','Assigned Clients','Status']];
+  const rows=role==='client'?[['Client ID','Name','Email','Projects','Status']]:
+    [['Username','Name','Email','Assigned Clients','Status']];
   us.forEach(u=>{
     const px=DB.getProjects().filter(p=>p.clientId===u.id).length;
-    if(role==='client')rows.push([u.clientId||'',u.name,u.email||'',u.password,px,u.active!==false?'Active':'Inactive']);
-    else rows.push([u.username||u.name,u.name,u.email||'',u.password,(u.assignedClients||[]).length,u.active!==false?'Active':'Inactive']);
+    if(role==='client')rows.push([u.clientId||'',u.name,u.email||'',px,u.active!==false?'Active':'Inactive']);
+    else rows.push([u.username||u.name,u.name,u.email||'',(u.assignedClients||[]).length,u.active!==false?'Active':'Inactive']);
   });
   dlTxt(rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n'),role+'s_export_'+new Date().toISOString().slice(0,10)+'.csv');
 }
@@ -2861,8 +3112,8 @@ ${sorted.length?sorted.map(p=>creatorProjCard(p)).join(''):'<div style="color:va
 
 function creatorProjCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const wf=p.workflowStatus||'new';const alert=p.newBrief||p.pendingFeedback;
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const revs=p.synopsisRevisions||[];const hasSyn=revs.length>0;
   const brief={...p.clientBrief,...p.brief};const briefKeys=Object.keys(brief).filter(k=>brief[k]&&k!=='videoRefUrl'&&k!=='additionalNotes');
   const unread=getUnreadCommentCount(p,S.session?.userId);
@@ -2929,8 +3180,8 @@ function creatorProjectDetail(p){
   const brief={...p.clientBrief,...p.brief};
   const revs=p.synopsisRevisions||[];
   const clAssets=cl?.brandAssets||[];
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   return`<div class="page">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
 <button class="btn btn-ghost btn-sm" onclick="S.creatorDetailPid=null;render()">← My Projects</button>
@@ -2974,7 +3225,7 @@ ${p.clientRefs.map(r=>r.preview?`<img src="${r.preview}" style="width:64px;heigh
 <!-- Synopsis versions -->
 <div class="section-lbl">Synopsis History ${p.synopsisLocked?'<span class="badge badge-green">Approved ✓</span>':''}</div>
 ${revs.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:420px;overflow-y:auto">
-${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0a0800':'var(--bg2)'};border:1px solid ${i===revs.length-1?'#B8960C33':'var(--b1)'};border-radius:7px;padding:12px">
+${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0e0a18':'var(--bg2)'};border:1px solid ${i===revs.length-1?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:7px;padding:12px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
 <span style="font-size:9px;font-weight:700;color:${i===revs.length-1?'var(--gold)':'var(--t4)'}">Version ${r.version} ${i===revs.length-1?'· Latest':''}</span>
 <span style="font-size:8px;color:var(--t4)">${r.timestamp?new Date(r.timestamp).toLocaleDateString():''}</span>
@@ -3036,13 +3287,13 @@ function creatorInbox(){
 <div><div class="page-title">Inbox</div><div class="page-sub">${notifs.length} notifications · ${unread} unread</div></div>
 ${unread?`<button class="btn btn-ghost btn-sm" onclick="DB.markAllRead('${uid}');render()">Mark all read</button>`:''}
 </div>
-${notifs.length?notifs.map(n=>{const typeColors={brief:'#B8960C44',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'#B8960C22'};const col=typeColors[n.type]||'var(--b1)';
-return`<div style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}');render()">
+${notifs.length?notifs.map(n=>{const typeColors={brief:'rgba(255,107,53,0.25)',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'rgba(255,107,53,0.12)'};const col=typeColors[n.type]||'var(--b1)';
+return`<div class="inbox-notif" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}">
 <div style="width:8px;height:8px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:4px"></div>
 <div style="flex:1"><div style="font-size:11px;font-weight:700;color:${n.read?'var(--t2)':'#fff'}">${esc(n.title)}</div>
 <div style="font-size:10px;color:var(--t3);margin-top:2px;line-height:1.4">${esc(n.body)}</div>
 <div style="font-size:8px;color:var(--t4);margin-top:4px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div>
-${n.projectId?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clickNotif('${n.id}','${n.projectId}');render()">Open →</button>`:''}
+${n.projectId?`<button class="btn btn-outline btn-sm inbox-notif-open" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId)}">Open →</button>`:''}
 </div>`;}).join(''):'<div style="padding:40px;text-align:center;color:var(--t4);font-size:11px">No notifications yet</div>'}
 </div>`;
 }
@@ -3271,7 +3522,7 @@ ${q.t==='select'?`<select id="bans" style="width:100%;max-width:380px;font-size:
 q.t==='textarea'?`<textarea id="bans" rows="4" style="width:100%;font-size:12px;padding:10px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px;font-family:Arial,sans-serif;resize:vertical" placeholder="${q.hint||''}">${esc((S.bAnswers||{})[q.id]||'')}</textarea>`:
 `<input type="text" id="bans" value="${esc((S.bAnswers||{})[q.id]||'')}" placeholder="${q.hint||q.q}" style="width:100%;max-width:480px;font-size:13px;padding:10px 12px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px" onkeydown="if(event.key==='Enter')advanceBrief()"/>`}
 <!-- AI Assistant panel -->
-<div id="ai-help-panel" style="display:none;margin-top:14px;background:#0a0800;border:1px solid #B8960C33;border-radius:8px;padding:13px">
+<div id="ai-help-panel" style="display:none;margin-top:14px;background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:8px;padding:13px">
 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
 <span style="font-size:12px">✦</span><span style="font-size:10px;font-weight:700;color:var(--gold)">Claude Assistant</span>
 <button onclick="document.getElementById('ai-help-panel').style.display='none'" style="background:none;border:none;color:var(--t4);cursor:pointer;margin-left:auto;font-size:13px">✕</button>
@@ -3317,7 +3568,7 @@ async function briefAiHelp(){
     textEl.innerHTML=esc(parts[0].trim()).replace(/\n/g,'<br>');
     if(parts[1]){
       S.briefAiSuggestion=parts[1].trim();
-      textEl.innerHTML+=`<div style="margin-top:10px;padding:8px 10px;background:#1a1000;border:1px solid #B8960C33;border-radius:5px;font-size:10px;color:var(--gold)"><strong>Suggested answer:</strong> ${esc(S.briefAiSuggestion)}</div>`;
+      textEl.innerHTML+=`<div style="margin-top:10px;padding:8px 10px;background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);border-radius:5px;font-size:10px;color:var(--gold)"><strong>Suggested answer:</strong> ${esc(S.briefAiSuggestion)}</div>`;
     }
   }catch(e){
     loadEl.style.display='none';
@@ -3467,12 +3718,12 @@ function showEditUserModal(uid){
   openModal(`<div class="modal-title">Edit ${u.role} — ${esc(u.name)}</div>
 <div class="fg"><label>Full Name</label><input type="text" id="eu-n" value="${esc(u.name)}"/></div>
 <div class="fg"><label>Email</label><input type="text" id="eu-e" value="${esc(u.email||'')}"/></div>
-<div class="fg"><label>Password</label><input type="text" id="eu-p" value="${esc(u.password||'')}"/></div>
+<div class="fg"><label>Password</label><input type="password" id="eu-p" value="${esc(u.password||'')}"/></div>
 ${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <strong style="color:var(--purple)">${u.clientId}</strong></div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
-function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
+function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);auditLog('user_status_changed',u.active?'Activated':'Deactivated',uid);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
 
 function showAssignClientsModal(empId){
   const emp=DB.getUser(empId);if(!emp)return;
@@ -3480,7 +3731,7 @@ function showAssignClientsModal(empId){
   const assigned=new Set(emp.assignedClients||[]);
   openModal(`<div class="modal-title">Assign Clients — ${esc(emp.name)}</div>
 <div style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;margin-bottom:12px">
-${clients.map(c=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border:1px solid ${assigned.has(c.id)?'#B8960C44':'var(--b1)'};border-radius:6px;cursor:pointer">
+${clients.map(c=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border:1px solid ${assigned.has(c.id)?'rgba(255,107,53,0.25)':'var(--b1)'};border-radius:6px;cursor:pointer">
 <input type="checkbox" id="ac-${c.id}" ${assigned.has(c.id)?'checked':''} style="accent-color:var(--gold)"/>
 <div><div style="font-size:11px;color:#fff">${esc(c.name)}</div><div style="font-size:9px;color:var(--t4)">${c.clientId||''}</div></div>
 </label>`).join('')}
@@ -3505,21 +3756,37 @@ function showNewProjModal(prefill){
   const clients=DB.getUsers().filter(u=>u.role==='client');
   const emps=DB.getUsers().filter(u=>u.role==='creator');
   const pf=prefill||{};
-  openModal(`<div class="modal-title">New Project</div>
+  const mtColors={commercial_ad:'#FF6B35',short_film:'#8B5CF6',youtube_explainer:'#EF4444',podcast:'#3B82F6',product_video:'#06B6D4',testimonial:'#10B981',influencer_ugc:'#EC4899',music_video:'#F59E0B',design:'#06B6D4'};
+  openModal(`<div class="modal-title">Launch New Project</div>
+
+<div class="fg"><label>Project Name</label><input type="text" id="np-n" value="${esc(pf.name||'')}" placeholder="e.g. Q4 Social Campaign — Brand Awareness"/></div>
+
+<div class="section-lbl" style="margin-top:12px">Media Type</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">
+${Object.entries(MT).map(([k,m])=>`<div onclick="document.querySelectorAll('.mt-card').forEach(c=>c.style.borderColor='var(--b2)');this.style.borderColor='${mtColors[k]||'var(--gold)'}';document.getElementById('np-t').value='${k}'" class="mt-card" style="background:var(--bg3);border:2px solid ${(pf.type||'commercial_ad')===k?(mtColors[k]||'var(--gold)'):'var(--b2)'};border-radius:var(--r);padding:10px;cursor:pointer;text-align:center;transition:border-color .15s">
+<div style="font-size:18px;margin-bottom:4px">${m.icon}</div>
+<div style="font-size:9px;font-weight:700;color:var(--t2)">${m.label}</div>
+</div>`).join('')}
+</div>
+<select id="np-t" style="display:none">${Object.entries(MT).map(([k,m])=>`<option value="${k}"${(pf.type||'commercial_ad')===k?' selected':''}>${m.label}</option>`).join('')}</select>
+
+<div class="section-lbl">Priority</div>
+<div style="display:flex;gap:6px;margin-bottom:16px">
+${[{v:'low',l:'Low',c:'var(--t4)',bg:'var(--bg3)'},{v:'medium',l:'Medium',c:'#F59E0B',bg:'rgba(245,158,11,0.08)'},{v:'high',l:'High',c:'var(--red)',bg:'rgba(239,68,68,0.08)'}].map(p=>`<button type="button" onclick="document.querySelectorAll('.pri-btn').forEach(b=>{b.style.borderColor='var(--b2)';b.style.background='var(--bg3)'});this.style.borderColor='${p.c}';this.style.background='${p.bg}';document.getElementById('np-pri').value='${p.v}'" class="pri-btn" style="flex:1;padding:8px;border-radius:var(--r);border:2px solid ${(pf.priority||'medium')===p.v?p.c:'var(--b2)'};background:${(pf.priority||'medium')===p.v?p.bg:'var(--bg3)'};color:${p.c};cursor:pointer;font-size:10px;font-weight:700;font-family:inherit;text-align:center">${p.l}</button>`).join('')}
+</div>
+<select id="np-pri" style="display:none"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+
+<div class="section-lbl">Assignment & Timeline</div>
 <div class="form2">
-<div class="fg full"><label>Project Name</label><input type="text" id="np-n" value="${esc(pf.name||'')}" placeholder="e.g. Q4 Social Campaign — Brand Awareness"/></div>
-<div class="fg"><label>Media Type</label><select id="np-t">${Object.entries(MT).map(([k,m])=>`<option value="${k}"${pf.type===k?' selected':''}>${m.icon} ${m.label}</option>`).join('')}</select></div>
-<div class="fg"><label>Priority</label><select id="np-pri">
-<option value="medium">● Medium</option><option value="high">🔴 High</option><option value="low">○ Low</option>
-</select></div>
 <div class="fg"><label>Link Client</label><select id="np-c"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${pf.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
 <div class="fg"><label>Assign Creator</label><select id="np-e"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Deadline</label><input type="date" id="np-dl" value="${pf.deadline||''}"/></div>
-<div class="fg"><label>Tags (comma separated)</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
-<div class="fg full"><label>Brief / Notes</label><textarea id="np-notes" rows="2" placeholder="Any initial notes or brief details...">${esc(pf.notes||'')}</textarea></div>
+<div class="fg"><label>Tags</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
 </div>
+<div class="fg"><label>Brief / Notes</label><textarea id="np-notes" rows="2" placeholder="Any initial notes or brief details...">${esc(pf.notes||'')}</textarea></div>
+
 <input type="hidden" id="np-wfinit" value="${esc(pf.workflowStatus||'')}"/>
-<div class="btn-row"><button class="btn btn-gold" onclick="doNewProject()">Create Project →</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+<div class="btn-row"><button class="btn btn-gold" onclick="doNewProject()" style="flex:1;justify-content:center">✦ Launch Project</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doNewProject(){
   const name=document.getElementById('np-n')?.value.trim();if(!name){toast('Name required','err');return}
@@ -3582,7 +3849,7 @@ function openModal(html){document.getElementById('modal-root').innerHTML=`<div c
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
-function viewAsClient(cid){const og=S.session.userId;S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
+function viewAsClient(cid){const og=S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
 
 // ══════════════════════════════════════
 // STUDIO
@@ -3615,7 +3882,7 @@ function studioWrap(){
 <button class="btn btn-ghost btn-sm" onclick="S.tab='${S.view==='admin'?'projects':'dashboard'}';S.pid=null;render()">← Back</button>
 <div style="flex:1;min-width:120px;display:flex;align-items:baseline;gap:7px">
 <input id="ph-n" value="${esc(p.name)}" style="background:transparent;border:none;color:#fff;font-size:13px;font-weight:700" onblur="saveInputs()"/>
-${p.projectId?`<span style="font-size:9px;font-weight:700;color:var(--gold);font-family:monospace;background:#1a1000;border:1px solid #B8960C33;padding:2px 7px;border-radius:11px">${p.projectId}</span>`:''}
+${p.projectId?`<span style="font-size:9px;font-weight:700;color:var(--gold);font-family:monospace;background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);padding:2px 7px;border-radius:11px">${p.projectId}</span>`:''}
 </div>
 ${cl?`<span class="badge badge-purple">${esc(cl.clientId||'')}</span><span style="font-size:10px;color:var(--t3)">${esc(cl.name)}</span>`:''}
 <select id="ph-wf" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px" onchange="saveInputs()">
@@ -3623,7 +3890,7 @@ ${['new','brief_submitted','synopsis_review','synopsis_locked','storyboard_in_pr
 </select>
 <div style="display:flex;align-items:center;gap:4px">
 <span style="font-size:8px;color:var(--t4);text-transform:uppercase">Deadline</span>
-<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0a02044':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0c070':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
+<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0a02044':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#FF8A5C':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
 </div>
 ${wf==='brief_submitted'||p.newBrief?`<button class="btn btn-gold btn-sm" onclick="genSynopsis()">✦ Generate Synopsis</button>`:''}
 ${p.type==='design'?`<button class="btn btn-purple btn-sm" onclick="openCanvaForDesign('${p.id}')">🎨 Open in Canva</button>`:'' }
@@ -3744,7 +4011,7 @@ function writerSelector(p){
 <span style="font-size:8px;color:var(--gold);margin-left:auto">Active: ${active.icon} ${active.n}</span>
 </div>
 <div style="display:flex;gap:6px;flex-wrap:wrap">
-${WRITER_TYPES.map(w=>`<button onclick="S.writerId='${w.id}';const pp=DB.getProject(S.pid);if(pp){pp.writerId='${w.id}';DB.saveProject(pp);}render()" style="background:${current===w.id?'#1a1000':'var(--bg3)'};border:1px solid ${current===w.id?'var(--gold)':'var(--b2)'};color:${current===w.id?'var(--gold)':'var(--t3)'};padding:5px 10px;border-radius:6px;cursor:pointer;font-size:9px;display:flex;align-items:center;gap:4px;transition:all 0.15s" title="${esc(w.desc)}"><span>${w.icon}</span><span style="font-weight:${current===w.id?'700':'400'}">${w.n}</span></button>`).join('')}
+${WRITER_TYPES.map(w=>`<button onclick="S.writerId='${w.id}';const pp=DB.getProject(S.pid);if(pp){pp.writerId='${w.id}';DB.saveProject(pp);}render()" style="background:${current===w.id?'#1a0f1e':'var(--bg3)'};border:1px solid ${current===w.id?'var(--gold)':'var(--b2)'};color:${current===w.id?'var(--gold)':'var(--t3)'};padding:5px 10px;border-radius:6px;cursor:pointer;font-size:9px;display:flex;align-items:center;gap:4px;transition:all 0.15s" title="${esc(w.desc)}"><span>${w.icon}</span><span style="font-weight:${current===w.id?'700':'400'}">${w.n}</span></button>`).join('')}
 </div>
 <div style="font-size:8px;color:var(--t4);margin-top:6px;line-height:1.4">${active.icon} <strong>${active.n}</strong> — ${active.desc}${current==='auto'?` (auto-selected for ${MT[p.type]?.label||'this project'})`:''}</div>
 </div>`;
@@ -3759,10 +4026,10 @@ ${writerSelector(p)}
 </div>
 ${latest?voiceReaderBar('synopsis',latest.text):''}
 <div class="ai-load" id="syn-load"><div class="spinner"></div>Generating synopsis...</div>
-${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0a0800':'var(--bg3)'};border:1px solid ${i===revs.length-1?'#B8960C22':'var(--b1)'};border-radius:7px;padding:13px;margin-bottom:8px">
+${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0e0a18':'var(--bg3)'};border:1px solid ${i===revs.length-1?'rgba(255,107,53,0.12)':'var(--b1)'};border-radius:7px;padding:13px;margin-bottom:8px">
 <div style="font-size:9px;color:var(--t4);margin-bottom:6px;display:flex;justify-content:space-between">
 <span>Version ${r.version}${r.timestamp?' — '+new Date(r.timestamp).toLocaleDateString():''}</span>
-${r.feedback?`<span style="color:#B8960C88">FB: "${esc(r.feedback.substring(0,40))}"</span>`:'<span style="color:var(--t4)">Original</span>'}
+${r.feedback?`<span style="color:rgba(255,107,53,0.5)">FB: "${esc(r.feedback.substring(0,40))}"</span>`:'<span style="color:var(--t4)">Original</span>'}
 </div>
 <div style="font-size:11px;color:var(--t2);line-height:1.9;white-space:pre-wrap">${esc(r.text)}</div>
 </div>`).join('')}
@@ -3867,7 +4134,7 @@ function renderComplianceResult(text){
     if(!line.trim())return'';
     const pass=line.includes('✅');const fail=line.includes('❌');const verdict=line.toUpperCase().includes('VERDICT');
     const col=pass?'var(--green)':fail?'var(--red)':verdict?'var(--gold)':'var(--t2)';
-    const bg=fail?'#1a0000':verdict?'#0a0800':'transparent';
+    const bg=fail?'#1a0000':verdict?'#0e0a18':'transparent';
     const hasFixBtn=fail?`<button onclick="fixComplianceLine('${esc(line.replace(/'/g,"\'"))}')" style="margin-left:8px;background:none;border:1px solid var(--red);color:var(--red);font-size:7px;padding:1px 5px;border-radius:3px;cursor:pointer;flex-shrink:0">Fix</button>`:'';
     return`<div style="padding:4px 6px;color:${col};font-weight:${verdict?'700':'400'};background:${bg};border-radius:3px;display:flex;align-items:flex-start;gap:4px">${esc(line)}${hasFixBtn}</div>`;
   }).join('');
@@ -3888,11 +4155,11 @@ function renderScriptTable(script){
       if(!inTable){
         html+=`<div style="overflow-x:auto;margin-bottom:2px"><table style="width:100%;border-collapse:collapse;font-size:10px">
 <thead><tr>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase;white-space:nowrap;width:70px">Time</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">Visual</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">VO / Dialogue</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">SFX / Music</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">Super</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase;white-space:nowrap;width:70px">Time</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">Visual</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">VO / Dialogue</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">SFX / Music</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">Super</th>
 </tr></thead><tbody>`;
         inTable=true;
       }
@@ -3902,7 +4169,7 @@ function renderScriptTable(script){
       const tc=timeMatch[1];
       const visual=parts[0]||'';const vo=parts[1]||'—';const sfx=parts[2]||'—';const sup=parts[3]||'—';
       const isPack=trimmed.toUpperCase().includes('PACK SHOT')||trimmed.toUpperCase().includes('LOGO CARD');
-      const bg=isPack?'#080a00':'var(--bg2)';
+      const bg=isPack?'#0e0a18':'var(--bg2)';
       html+=`<tr style="background:${bg}">
 <td style="padding:6px 8px;border:1px solid #222;color:var(--gold);font-weight:700;white-space:nowrap;vertical-align:top">[${esc(tc)}]</td>
 <td style="padding:6px 8px;border:1px solid #222;color:var(--t1);vertical-align:top;line-height:1.5">${esc(visual)}</td>
@@ -4338,7 +4605,7 @@ function sShots(p,mt){
   return`<div class="ptitle">Shot List</div><div class="psub">${shots.length} shots</div>
 <div class="btn-row" style="margin-bottom:10px"><button class="btn btn-gold" onclick="genShots()" id="btn-gen-sh">✦ Generate</button><button class="btn btn-ghost btn-sm" onclick="addShot()">+ Add</button><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button></div>
 <div class="ai-load" id="sh-load"><div class="spinner"></div>Generating shots...</div>
-${shots.map((s,i)=>`<div class="shot-row"><div class="shot-hd"><span class="sn2">S${s.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:#B8960C77;font-weight:700;text-transform:uppercase;flex:1">${esc(s.scene||'')}</span><span style="font-size:9px;color:var(--t4)">${esc(s.type||'')}</span><button onclick="rmShot(${i})" style="background:none;border:none;color:var(--b3);cursor:pointer;font-size:12px">✕</button></div>
+${shots.map((s,i)=>`<div class="shot-row"><div class="shot-hd"><span class="sn2">S${s.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:rgba(255,107,53,0.45);font-weight:700;text-transform:uppercase;flex:1">${esc(s.scene||'')}</span><span style="font-size:9px;color:var(--t4)">${esc(s.type||'')}</span><button onclick="rmShot(${i})" style="background:none;border:none;color:var(--b3);cursor:pointer;font-size:12px">✕</button></div>
 <div class="shot-bd"><div class="sf"><label>Description</label><textarea data-shot="${i}.description" rows="3">${esc(s.description||'')}</textarea></div><div class="sf"><label>AI Image Prompt</label><textarea data-shot="${i}.prompt" rows="3">${esc(s.prompt||'')}</textarea></div></div></div>`).join('')}
 <div class="btn-row" style="margin-top:12px"><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button><button class="btn btn-gold" onclick="goStage(${p.modules?.visuals?2:3})">→ ${p.modules?.visuals?'Visuals':'Production'}</button></div>`;
 }
@@ -4430,7 +4697,7 @@ ${grouped[t].map(ref=>`<div style="background:var(--bg2);border:1px solid ${ref.
 <div style="padding:5px 8px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--b1)">
 <span style="font-size:9px;font-weight:700;color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(ref.label||'')}</span>
 <div style="display:flex;gap:3px;align-items:center">
-${ref.uploaded?'<span style="font-size:7px;color:var(--blue);background:#050d18;padding:1px 4px;border-radius:3px">upload</span>':''}
+${ref.uploaded?'<span style="font-size:7px;color:var(--blue);background:#0a0a18;padding:1px 4px;border-radius:3px">upload</span>':''}
 <span style="font-size:7px;padding:1px 5px;border-radius:4px;background:${ref.status==='done'?'#041004':ref.status==='gen'?'#1a0f00':'var(--bg4)'};color:${ref.status==='done'?'var(--green)':ref.status==='gen'?'var(--gold)':'var(--t4)'}" id="rst-${ref._i}">${ref.status||'idle'}</span>
 </div>
 </div>
@@ -4567,7 +4834,7 @@ function sMultiAngle(p){
 ${!refs.length?`<div class="ib ib-red">No reference images yet. Go back to References and generate or upload at least one reference first.</div>`:''}
 <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <span style="font-size:10px;color:var(--t3);font-weight:700">Grid size:</span>
-${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};S.maSelectedAngles={};render()" style="background:${gridSize===n?'#1a1000':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
+${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};S.maSelectedAngles={};render()" style="background:${gridSize===n?'#1a0f1e':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
 <button class="btn btn-gold" onclick="genAllAngles()" id="btn-ma-all" style="margin-left:8px">✦ Generate Selected</button>
 <button class="btn btn-ghost btn-sm" onclick="S.stopSb=true">■ Stop</button>
 <div style="display:flex;gap:5px;margin-left:auto">
@@ -4735,7 +5002,7 @@ function sStoryboard(p){
 <button class="btn btn-ghost btn-sm" onclick="dlAllSbHiRes()" title="Download all frames as high-res">↓ All HiRes</button>
 </div>
 ${hasFb?`<div class="section-lbl">Client Feedback${p.storyboardFeedback?.length?' ('+p.storyboardFeedback.length+' shot notes)':''}</div>
-${(p.storyboardFeedback||[]).map(f=>`<div style="background:var(--bg2);border:1px solid #B8960C33;border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--gold)">S${f.num}:</strong> ${esc(f.feedback)}</div>`).join('')}
+${(p.storyboardFeedback||[]).map(f=>`<div style="background:var(--bg2);border:1px solid rgba(255,107,53,0.18);border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--gold)">S${f.num}:</strong> ${esc(f.feedback)}</div>`).join('')}
 ${p.overallStoryboardFeedback?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--t3)">Overall: </strong>${esc(p.overallStoryboardFeedback)}</div>`:''}
 <button class="btn btn-gold btn-sm" style="margin-bottom:12px" onclick="clearSbFeedback()">Mark Feedback as Addressed</button>`:''}
 <div class="sb-grid">${shots.map(s=>sbCard(s,S.sbState[s.num])).join('')}${!shots.length?'<div style="color:var(--t4);font-size:10px;padding:10px;grid-column:1/-1">Generate shots in Writing → Step 5 first.</div>':''}</div>`;
@@ -4754,9 +5021,9 @@ function sbCard(s,sd){
   return`<div class="sbc2" id="sbc-${s.num}" style="${hasQaIssue?'border:2px solid var(--red);':''}">
 <div class="sbt">
 <span class="sbnum">S${s.num}</span>
-<span style="font-size:8px;color:#B8960C77;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scene||'')}</span>
+<span style="font-size:8px;color:rgba(255,107,53,0.45);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scene||'')}</span>
 ${qaResult?`<span style="font-size:7px;color:${qaResult.pass?'var(--green)':'var(--red)'};background:${qaResult.pass?'#041004':'#180404'};padding:1px 5px;border-radius:3px;font-weight:700" title="${esc(qaResult.feedback||'')}">QA:${qaResult.score||'?'}/10</span>`:''}
-${variants.length?`<span style="font-size:7px;color:var(--blue);background:#050d18;padding:1px 4px;border-radius:3px">${variants.length}v</span>`:''}
+${variants.length?`<span style="font-size:7px;color:var(--blue);background:#0a0a18;padding:1px 4px;border-radius:3px">${variants.length}v</span>`:''}
 <span class="sbst ${bc}" id="sbb-${s.num}">${bt}</span>
 </div>
 <div class="sb-iw" id="sbi-${s.num}" style="${hasQaIssue?'position:relative;':''}">
@@ -4810,9 +5077,9 @@ async function singleSb(num){S.stopSb=false;const p=DB.getProject(S.pid);if(!p)r
 async function runSbShot(p,shot){
   if(S.stopSb)return;
   S.sbState[shot.num]={status:'gen',img:null,prompt:''};setSbSt(shot.num,'gen','gen...');
-  const maxTries=parseInt(document.getElementById('s-rt')?.value)||3;
+  const maxTries=parseInt(document.getElementById('s-rt')?.value,10)||3;
   const doQa=document.getElementById('tog-qa')?.classList.contains('on');
-  const thresh=parseInt(document.getElementById('s-th')?.value)||7;
+  const thresh=parseInt(document.getElementById('s-th')?.value,10)||7;
   const bestOf3=document.getElementById('tog-bo3')?.classList.contains('on');
   // Include user comment in prompt if available
   const userComment=(p.sbComments||{})[shot.num]||'';
@@ -4930,7 +5197,7 @@ function sVidPrompts(p){
   return`<div class="ptitle">Video Prompts</div><div class="psub">4-component packages per shot.</div>
 <div class="btn-row" style="margin-bottom:10px"><button class="btn btn-gold" onclick="genVidPrompts()">✦ Generate All</button><button class="btn btn-ghost btn-sm" onclick="goStep(2)">←</button><span id="vp-st" style="font-size:9px;color:var(--t4)">${vps.length?vps.length+' packages':''}</span></div>
 <div class="ai-load" id="vp-load"><div class="spinner"></div>Generating...</div>
-${vps.map((vp,i)=>`<div class="vpc"><div class="vph"><span class="sn2">S${vp.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:#B8960C77;font-weight:700;flex:1">${esc(vp.scene||'')}</span></div>
+${vps.map((vp,i)=>`<div class="vpc"><div class="vph"><span class="sn2">S${vp.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:rgba(255,107,53,0.45);font-weight:700;flex:1">${esc(vp.scene||'')}</span></div>
 <div style="display:grid;grid-template-columns:180px 1fr">
 <div style="padding:8px;border-right:1px solid var(--b1)"><div class="vvid">${S.sbState[vp.num]?.img?`<img src="${S.sbState[vp.num].img}"/>`:'<div class="vvph">◇</div>'}</div></div>
 <div style="padding:8px;display:flex;flex-direction:column;gap:4px">
@@ -5072,7 +5339,7 @@ ${vs.url?`<video src="${vs.url}" controls style="width:100%;border-radius:5px"><
 <!-- Audio text -->
 <textarea id="al-${vp.num}" rows="4" style="font-size:9px;line-height:1.5;font-family:Arial,sans-serif;resize:vertical" placeholder="${vp.json?.audio&&vp.json.audio!=='none'?'Dialogue text…':'Describe the sound: footsteps on gravel, traffic noise, engine hum…'}">${esc(vp.json?.audio&&vp.json.audio!=='none'?vp.json.audio:vp.shot_description?.substring(0,60)||'')}</textarea>
 <!-- Suggest result -->
-<div id="asuggest-${vp.num}" style="display:none;font-size:9px;color:var(--gold);background:#0a0800;border:1px solid #B8960C33;border-radius:5px;padding:6px 8px;line-height:1.6"></div>
+<div id="asuggest-${vp.num}" style="display:none;font-size:9px;color:var(--gold);background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:5px;padding:6px 8px;line-height:1.6"></div>
 <button class="btn btn-green" style="width:100%" onclick="genShotAudio('${vp.num}')">♪ Generate Audio</button>
 <audio id="ala-${vp.num}" controls style="width:100%;display:${as.url?'block':'none'};margin-top:2px" ${as.url?`src="${as.url}"`:''}></audio>
 ${hasAud?`<button onclick="downloadAudio('${vp.num}')" class="btn btn-ghost btn-sm" style="font-size:8px;width:100%">↓ Audio</button>`:''}
@@ -5172,20 +5439,10 @@ async function genShotAudio(num){
   try{
     let blob;
     if(isDialogue){
-      const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{
-        method:'POST',
-        headers:{'xi-api-key':k,'Content-Type':'application/json'},
-        body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8,style:0.3,use_speaker_boost:true}})
-      });
-      if(!r.ok){const t=await r.text();throw new Error('EL '+r.status+': '+t.substring(0,60));}
+      const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8,style:0.3,use_speaker_boost:true}});
       blob=await r.blob();
     }else{
-      const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{
-        method:'POST',
-        headers:{'xi-api-key':k,'Content-Type':'application/json'},
-        body:JSON.stringify({text:txt,duration_seconds:parseFloat(document.getElementById(`vd-${num}`)?.value||8),prompt_influence:.4})
-      });
-      if(!r.ok){const t=await r.text();throw new Error('EL '+r.status+': '+t.substring(0,60));}
+      const r=await elFetch('/v1/sound-generation',{text:txt,duration_seconds:parseFloat(document.getElementById(`vd-${num}`)?.value||8),prompt_influence:.4});
       blob=await r.blob();
     }
     // Convert blob to base64 for persistent storage (audio ~100-300KB, fine in DB)
@@ -5278,11 +5535,11 @@ ${!vps.length?'<div style="color:var(--t4);font-size:10px;padding:8px;grid-colum
 </div>
 <div class="btn-row" style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button><button class="btn btn-gold" onclick="goStep(6)">Assembly →</button></div>`;
 }
-async function genDialogue(num){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById(`al-${num}`)?.value.trim();const voice=document.getElementById(`alv-${num}`)?.value;if(!txt)return;setAst(num,'gen','gen...');try{const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8}})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
-async function genSFX(num){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById(`al-${num}`)?.value.trim();if(!txt)return;setAst(num,'gen','gen...');try{const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,duration_seconds:6,prompt_influence:.3})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
+async function genDialogue(num){const txt=document.getElementById(`al-${num}`)?.value.trim();const voice=document.getElementById(`alv-${num}`)?.value;if(!txt)return;setAst(num,'gen','gen...');try{const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8}});const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
+async function genSFX(num){const txt=document.getElementById(`al-${num}`)?.value.trim();if(!txt)return;setAst(num,'gen','gen...');try{const r=await elFetch('/v1/sound-generation',{text:txt,duration_seconds:6,prompt_influence:.3});const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
 async function genAllAudio(){const p=DB.getProject(S.pid);if(!p)return;for(const vp of p.vidPrompts){const hd=vp.json?.audio&&vp.json.audio!=='none';if(hd)await genDialogue(vp.num);else await genSFX(vp.num);await sleep(200);}toast('Audio done!','ok');}
-async function genMusic(){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}document.getElementById('mus-st2').textContent='Generating...';try{const style=document.getElementById('mus-st')?.value;const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:`${style} music for professional media production`,duration_seconds:60,prompt_influence:.3})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();document.getElementById('mus-pl').src=URL.createObjectURL(blob);document.getElementById('mus-st2').textContent='✓ Ready';toast('Music ready!','ok');}catch(e){document.getElementById('mus-st2').textContent='Error';toast(e.message,'err');}}
-async function genVO(){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById('vo-txt')?.value.trim();if(!txt){toast('Enter VO text first','err');return}document.getElementById('vo-st').textContent='Generating...';try{const voice=document.getElementById('vo-v')?.value;const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.6,similarity_boost:.75}})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();document.getElementById('vo-pl').src=URL.createObjectURL(blob);document.getElementById('vo-st').textContent='✓ Ready';toast('VO ready!','ok');}catch(e){document.getElementById('vo-st').textContent='Error';toast(e.message,'err');}}
+async function genMusic(){document.getElementById('mus-st2').textContent='Generating...';try{const style=document.getElementById('mus-st')?.value;const r=await elFetch('/v1/sound-generation',{text:`${style} music for professional media production`,duration_seconds:60,prompt_influence:.3});const blob=await r.blob();document.getElementById('mus-pl').src=URL.createObjectURL(blob);document.getElementById('mus-st2').textContent='✓ Ready';toast('Music ready!','ok');}catch(e){document.getElementById('mus-st2').textContent='Error';toast(e.message,'err');}}
+async function genVO(){const txt=document.getElementById('vo-txt')?.value.trim();if(!txt){toast('Enter VO text first','err');return}document.getElementById('vo-st').textContent='Generating...';try{const voice=document.getElementById('vo-v')?.value;const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.6,similarity_boost:.75}});const blob=await r.blob();document.getElementById('vo-pl').src=URL.createObjectURL(blob);document.getElementById('vo-st').textContent='✓ Ready';toast('VO ready!','ok');}catch(e){document.getElementById('vo-st').textContent='Error';toast(e.message,'err');}}
 function setAst(num,cls,txt){const el=document.getElementById(`ast-${num}`);if(el){el.className='ast ast-'+cls;el.textContent=txt;}}
 
 // ── STAGE 3, STEP 6: ASSEMBLY ──
@@ -5346,6 +5603,23 @@ function dlAllSbHiRes(){
 function dlAllVids(){const p=DB.getProject(S.pid);if(!p)return;(p.vidPrompts||[]).filter(vp=>S.vidState[vp.num]?.url).forEach((vp,i)=>setTimeout(()=>dlImg(S.vidState[vp.num].url,'S'+vp.num+'.mp4'),i*600));toast('Downloading...','info');}
 
 // ══════════════════════════════════════
+// API — ELEVENLABS (server-side proxy)
+// ══════════════════════════════════════
+async function elFetch(path,body){
+  aiStart();
+  try{
+  const k=kE(); // client key as fallback if server has no env var
+  const r=await fetch('/api/elevenlabs',{
+    method:'POST',
+    headers:_authHeaders(),
+    body:JSON.stringify({path,body,clientKey:k||undefined})
+  });
+  if(!r.ok){const d=await r.json().catch(()=>({error:'EL error '+r.status}));throw new Error(d.error||'EL '+r.status);}
+  return r;
+  }finally{aiEnd();}
+}
+
+// ══════════════════════════════════════
 // SAVE INPUTS
 // ══════════════════════════════════════
 function saveInputs(){
@@ -5366,27 +5640,35 @@ function saveInputs(){
 // API — CLAUDE
 // ══════════════════════════════════════
 async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
-  const k=kC();if(!k)throw new Error('No Anthropic key. Enter it in the top bar.');
+  aiStart();
+  try{
+  const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
   const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
+  const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
   // Route through Supabase edge function to avoid CORS (Anthropic API blocks direct browser requests)
   const sbUrl=(SB._url||localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
   const sbKey=SB._key||localStorage.getItem('sb_key')||'';
   const proxyUrl=sbUrl?sbUrl+'/functions/v1/claude-proxy':'';
   let r;
   if(proxyUrl&&sbKey){
-    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
+    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
   }else{
-    r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]})});
+    // Server route — sends client key as header; server prefers its own CLAUDE_API_KEY env var
+    const headers=_authHeaders({'anthropic-version':'2023-06-01'});
+    if(k)headers['x-api-key']=k; // only send if we have one — server may have its own
+    r=await fetch('/api/claude',{method:'POST',headers,body:payload});
   }
   const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));return d.content?.[0]?.text||'';
+  }finally{aiEnd();}
 }
 
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization'];const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,method,body,authorization})});}
+function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
 async function falImg(prompt){
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  aiStart();
+  const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   if(S.stopSb)throw new Error('Stopped');
   const rat=S.imgAspect||document.getElementById('s-rat')?.value||'16:9';
   // Apply tone/quality to prompt if set
@@ -5408,12 +5690,12 @@ async function falImg(prompt){
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${model}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${model}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb)throw new Error('Stopped');const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('fal generation failed');}throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb){aiEnd();throw new Error('Stopped');}const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){aiEnd();const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED'){aiEnd();throw new Error('fal generation failed');}}aiEnd();throw new Error('Timeout');
 }
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
   if(S.stopSb)throw new Error('Stopped');
-  const k=kF();if(!k)throw new Error('No fal.ai key');
+  const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
   const rat=document.getElementById('s-rat')?.value||'1:1';
   const model='fal-ai/flux-pro/kontext';
   const body={image_url:imgUrl,prompt,aspect_ratio:rat,output_format:'jpeg',safety_tolerance:'6'};
@@ -5424,8 +5706,8 @@ async function falImgI2I(imgUrl,prompt,strength){
   for(let i=0;i<120;i++){await sleep(2200);const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED')throw new Error('i2i failed');}throw new Error('Timeout');
 }
 async function falVid(imgUrl,prompt,dur,ratio){
-  const k=kF();if(!k)throw new Error('No fal.ai key');if(!S.vidModel)throw new Error('No model');
-  const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur),aspect_ratio:ratio})});
+  const k=kF();if(!S.vidModel)throw new Error('No model'); // k may be empty — server proxy has FAL_KEY
+  const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur,10),aspect_ratio:ratio})});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}`;
@@ -5438,6 +5720,11 @@ async function checkQa(url,prompt,thresh){try{const b64=await urlToB64(url);if(!
 // ══════════════════════════════════════
 function wfMiniDots(p){const steps=['Brief','Synopsis','Locked','Storyboard','Review','Done'];const wf=p.workflowStatus||'new';const idx=['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf);return`<div style="display:flex;gap:3px;align-items:center">${steps.map((s,i)=>`<div style="width:6px;height:6px;border-radius:50%;background:${i<idx?'var(--green)':i===idx?'var(--gold)':'var(--b3)'}" title="${s}"></div>${i<steps.length-1?'<div style="width:7px;height:1px;background:var(--b2)"></div>':''}`).join('')}</div>`;}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+// AI Engine indicator — tracks active AI operations
+let _aiOps=0;
+function aiStart(){_aiOps++;const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator active';d.title='AI Engine: processing ('+_aiOps+' active)';}}
+function aiEnd(){_aiOps=Math.max(0,_aiOps-1);if(_aiOps===0){const d=document.getElementById('ai-engine-dot');if(d){d.className='ai-indicator idle';d.title='AI Engine: idle';}}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function toast(msg,type=''){const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3500)}
 function copyText(id){const el=document.getElementById(id);if(!el)return;navigator.clipboard.writeText(el.value).then(()=>toast('Copied!','ok'))}
