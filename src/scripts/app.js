@@ -415,40 +415,23 @@ GRANT ALL ON studio_users, studio_projects, studio_notifications, studio_integra
 
 // ══════════════════════════════════════
 // PERSISTENT IMAGE STORAGE — imgbb.com
-// Free, permanent, no CORS, no account needed
-// API key is shared/public (imgbb free tier, rate limited)
+// Persistent image storage via server-side proxy (API key kept server-side)
 // ══════════════════════════════════════
-const IMGBB_KEY = '2e46be4a490507c76db5a3db06b2e5b8'; // free public key
-
 async function persistImage(url){
-  // Takes any URL or base64 data URL, uploads to imgbb, returns permanent URL
-  // Returns original URL if upload fails (graceful fallback)
+  // Uploads image to imgbb via server proxy, returns permanent URL
+  // Falls back to original URL if upload fails
   try{
-    const form = new FormData();
-    if(url.startsWith('data:')){
-      // base64 data URL — extract the base64 part
-      form.append('image', url.split(',')[1]);
-    } else {
-      // External URL (e.g. fal.ai CDN) — fetch and re-upload
-      const resp = await fetch(url);
-      if(!resp.ok) return url; // fallback
-      const blob = await resp.blob();
-      const b64 = await new Promise(res => {
-        const r = new FileReader();
-        r.onload = e => res(e.target.result.split(',')[1]);
-        r.readAsDataURL(blob);
-      });
-      form.append('image', b64);
-    }
-    const r = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
-      method: 'POST', body: form
+    const r=await fetch('/api/imgbb',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:url})
     });
-    if(!r.ok) return url;
-    const d = await r.json();
-    return d.data?.display_url || d.data?.url || url;
-  } catch(e) {
-    console.warn('imgbb upload failed:', e.message, '— using original URL');
-    return url; // graceful fallback — original URL still works short-term
+    if(!r.ok)return url;
+    const d=await r.json();
+    return d.url||url;
+  }catch(e){
+    console.warn('Image persist failed:',e.message,'— using original URL');
+    return url;
   }
 }
 
@@ -589,6 +572,12 @@ function render(){
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
   setTimeout(()=>SB._updateDot(),60);
+  setTimeout(bindInboxNotifs,70);
+}
+// Bind inbox notification click events (safe from XSS — uses data attributes not inline onclick)
+function bindInboxNotifs(){
+  document.querySelectorAll('.inbox-notif').forEach(el=>el.addEventListener('click',()=>{clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype);render();}));
+  document.querySelectorAll('.inbox-notif-open').forEach(el=>el.addEventListener('click',(e)=>{e.stopPropagation();clickNotif(el.dataset.nid,el.dataset.pid);render();}));
 }
 
 function mainHTML(){
@@ -622,17 +611,50 @@ function loginHTML(){
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <div class="fg"><label>Password</label><input type="password" id="lpw" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <button class="btn btn-gold" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">Sign In →</button>
-<div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Default admin: <strong style="color:var(--t3)">admin</strong> / <strong style="color:var(--t3)">admin123</strong></div>
+<div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Secure workspace — contact your admin for credentials</div>
 </div></div>
 </div>`;
 }
 
+// Brute force protection
+let _loginAttempts=0,_loginLockUntil=0;
 function doLogin(){
+  const now=Date.now();
+  if(now<_loginLockUntil){const secs=Math.ceil((_loginLockUntil-now)/1000);const el=document.getElementById('lerr');el.style.display='block';el.textContent=`Too many attempts. Try again in ${secs}s.`;return;}
   const id=document.getElementById('lid').value.trim();
   const pw=document.getElementById('lpw').value.trim();
+  if(!id||!pw){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Enter both username and password.';return;}
   const u=DB.getUsers().find(u=>u.active!==false&&u.password===pw&&(u.email===id||u.clientId===id||u.username===id||u.name.toLowerCase()===id.toLowerCase()));
-  if(!u){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Invalid credentials. Please try again.';return}
-  S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';render();toast('Welcome, '+u.name+'!','ok');
+  if(!u){
+    _loginAttempts++;
+    const el=document.getElementById('lerr');el.style.display='block';
+    if(_loginAttempts>=10){_loginLockUntil=now+300000;el.textContent='Account locked for 5 minutes. Too many failed attempts.';}
+    else if(_loginAttempts>=5){_loginLockUntil=now+30000;el.textContent='Too many attempts. Locked for 30 seconds.';}
+    else{el.textContent='Invalid credentials. Please try again. ('+_loginAttempts+'/5)';}
+    return;
+  }
+  // Check if inactive
+  if(u.active===false){const el=document.getElementById('lerr');el.style.display='block';el.textContent='Account is suspended. Contact your admin.';return;}
+  _loginAttempts=0;_loginLockUntil=0;
+  S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';
+  // Force password change if using default password
+  if(u.password==='admin123'&&u.role==='admin'){
+    render();
+    openModal(`<div class="modal-title">Change Default Password</div>
+<div class="ib ib-red"><strong>Security:</strong> You are using the default admin password. Please change it now.</div>
+<div class="fg"><label>New Password (min 8 characters)</label><input type="password" id="new-pw1" placeholder="Enter new password"/></div>
+<div class="fg"><label>Confirm Password</label><input type="password" id="new-pw2" placeholder="Confirm password"/></div>
+<div class="btn-row"><button class="btn btn-gold" onclick="forceChangePw()">Change Password</button></div>`);
+    return;
+  }
+  render();toast('Welcome, '+u.name+'!','ok');
+}
+function forceChangePw(){
+  const p1=document.getElementById('new-pw1')?.value||'';const p2=document.getElementById('new-pw2')?.value||'';
+  if(p1.length<8){toast('Password must be at least 8 characters','err');return;}
+  if(p1!==p2){toast('Passwords do not match','err');return;}
+  const u=DB.getUser(S.session?.userId);if(!u)return;
+  u.password=p1;DB.saveUser(u);closeModal();toast('Password changed! Welcome, '+u.name+'!','ok');
 }
 function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashboard';S.pid=null;render()}
 
@@ -701,7 +723,9 @@ function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:docume
 function hasNotifs(){const uid=S.session?.userId;if(!uid)return false;return DB.getNotifs(uid).some(n=>!n.read);}
 function getUnreadCount(){const uid=S.session?.userId;if(!uid)return 0;return DB.getNotifs(uid).filter(n=>!n.read).length;}
 function toggleNotifPanel(){const p=document.getElementById('notif-panel');const uid=S.session?.userId;if(!p||!uid)return;const isOpen=p.style.display!=='none';p.style.display=isOpen?'none':'block';if(!isOpen){renderNotifList(uid);}}
-function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#0d0a14'}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}')"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');}
+function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div class="notif-item" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#0d0a14'}"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');
+  // Event delegation — safe from XSS (no inline onclick with unescaped IDs)
+  list.querySelectorAll('.notif-item').forEach(el=>el.addEventListener('click',()=>clickNotif(el.dataset.nid,el.dataset.pid,el.dataset.ntype)));}
 function clickNotif(nid,pid,type){
   DB.markNotifRead(nid);
   if(pid){
@@ -3128,12 +3152,12 @@ function creatorInbox(){
 ${unread?`<button class="btn btn-ghost btn-sm" onclick="DB.markAllRead('${uid}');render()">Mark all read</button>`:''}
 </div>
 ${notifs.length?notifs.map(n=>{const typeColors={brief:'rgba(255,107,53,0.25)',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'rgba(255,107,53,0.12)'};const col=typeColors[n.type]||'var(--b1)';
-return`<div style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}');render()">
+return`<div class="inbox-notif" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId||'')}" data-ntype="${esc(n.type||'')}" style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}">
 <div style="width:8px;height:8px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:4px"></div>
 <div style="flex:1"><div style="font-size:11px;font-weight:700;color:${n.read?'var(--t2)':'#fff'}">${esc(n.title)}</div>
 <div style="font-size:10px;color:var(--t3);margin-top:2px;line-height:1.4">${esc(n.body)}</div>
 <div style="font-size:8px;color:var(--t4);margin-top:4px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div>
-${n.projectId?`<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clickNotif('${n.id}','${n.projectId}');render()">Open →</button>`:''}
+${n.projectId?`<button class="btn btn-outline btn-sm inbox-notif-open" data-nid="${esc(n.id)}" data-pid="${esc(n.projectId)}">Open →</button>`:''}
 </div>`;}).join(''):'<div style="padding:40px;text-align:center;color:var(--t4);font-size:11px">No notifications yet</div>'}
 </div>`;
 }
@@ -5263,20 +5287,10 @@ async function genShotAudio(num){
   try{
     let blob;
     if(isDialogue){
-      const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{
-        method:'POST',
-        headers:{'xi-api-key':k,'Content-Type':'application/json'},
-        body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8,style:0.3,use_speaker_boost:true}})
-      });
-      if(!r.ok){const t=await r.text();throw new Error('EL '+r.status+': '+t.substring(0,60));}
+      const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8,style:0.3,use_speaker_boost:true}});
       blob=await r.blob();
     }else{
-      const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{
-        method:'POST',
-        headers:{'xi-api-key':k,'Content-Type':'application/json'},
-        body:JSON.stringify({text:txt,duration_seconds:parseFloat(document.getElementById(`vd-${num}`)?.value||8),prompt_influence:.4})
-      });
-      if(!r.ok){const t=await r.text();throw new Error('EL '+r.status+': '+t.substring(0,60));}
+      const r=await elFetch('/v1/sound-generation',{text:txt,duration_seconds:parseFloat(document.getElementById(`vd-${num}`)?.value||8),prompt_influence:.4});
       blob=await r.blob();
     }
     // Convert blob to base64 for persistent storage (audio ~100-300KB, fine in DB)
@@ -5369,11 +5383,11 @@ ${!vps.length?'<div style="color:var(--t4);font-size:10px;padding:8px;grid-colum
 </div>
 <div class="btn-row" style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button><button class="btn btn-gold" onclick="goStep(6)">Assembly →</button></div>`;
 }
-async function genDialogue(num){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById(`al-${num}`)?.value.trim();const voice=document.getElementById(`alv-${num}`)?.value;if(!txt)return;setAst(num,'gen','gen...');try{const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8}})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
-async function genSFX(num){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById(`al-${num}`)?.value.trim();if(!txt)return;setAst(num,'gen','gen...');try{const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,duration_seconds:6,prompt_influence:.3})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
+async function genDialogue(num){const txt=document.getElementById(`al-${num}`)?.value.trim();const voice=document.getElementById(`alv-${num}`)?.value;if(!txt)return;setAst(num,'gen','gen...');try{const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.5,similarity_boost:.8}});const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
+async function genSFX(num){const txt=document.getElementById(`al-${num}`)?.value.trim();if(!txt)return;setAst(num,'gen','gen...');try{const r=await elFetch('/v1/sound-generation',{text:txt,duration_seconds:6,prompt_influence:.3});const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.getElementById(`ala-${num}`);if(a){a.src=url;a.style.display='block';}S.audioState[num]={url,status:'done'};setAst(num,'done','done');}catch(e){setAst(num,'err','error');toast(e.message,'err');}}
 async function genAllAudio(){const p=DB.getProject(S.pid);if(!p)return;for(const vp of p.vidPrompts){const hd=vp.json?.audio&&vp.json.audio!=='none';if(hd)await genDialogue(vp.num);else await genSFX(vp.num);await sleep(200);}toast('Audio done!','ok');}
-async function genMusic(){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}document.getElementById('mus-st2').textContent='Generating...';try{const style=document.getElementById('mus-st')?.value;const r=await fetch('https://api.elevenlabs.io/v1/sound-generation',{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:`${style} music for professional media production`,duration_seconds:60,prompt_influence:.3})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();document.getElementById('mus-pl').src=URL.createObjectURL(blob);document.getElementById('mus-st2').textContent='✓ Ready';toast('Music ready!','ok');}catch(e){document.getElementById('mus-st2').textContent='Error';toast(e.message,'err');}}
-async function genVO(){const k=kE();if(!k){toast('Enter ElevenLabs key','err');return}const txt=document.getElementById('vo-txt')?.value.trim();if(!txt){toast('Enter VO text first','err');return}document.getElementById('vo-st').textContent='Generating...';try{const voice=document.getElementById('vo-v')?.value;const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`,{method:'POST',headers:{'xi-api-key':k,'Content-Type':'application/json'},body:JSON.stringify({text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.6,similarity_boost:.75}})});if(!r.ok)throw new Error('EL '+r.status);const blob=await r.blob();document.getElementById('vo-pl').src=URL.createObjectURL(blob);document.getElementById('vo-st').textContent='✓ Ready';toast('VO ready!','ok');}catch(e){document.getElementById('vo-st').textContent='Error';toast(e.message,'err');}}
+async function genMusic(){document.getElementById('mus-st2').textContent='Generating...';try{const style=document.getElementById('mus-st')?.value;const r=await elFetch('/v1/sound-generation',{text:`${style} music for professional media production`,duration_seconds:60,prompt_influence:.3});const blob=await r.blob();document.getElementById('mus-pl').src=URL.createObjectURL(blob);document.getElementById('mus-st2').textContent='✓ Ready';toast('Music ready!','ok');}catch(e){document.getElementById('mus-st2').textContent='Error';toast(e.message,'err');}}
+async function genVO(){const txt=document.getElementById('vo-txt')?.value.trim();if(!txt){toast('Enter VO text first','err');return}document.getElementById('vo-st').textContent='Generating...';try{const voice=document.getElementById('vo-v')?.value;const r=await elFetch(`/v1/text-to-speech/${voice}`,{text:txt,model_id:'eleven_multilingual_v2',voice_settings:{stability:.6,similarity_boost:.75}});const blob=await r.blob();document.getElementById('vo-pl').src=URL.createObjectURL(blob);document.getElementById('vo-st').textContent='✓ Ready';toast('VO ready!','ok');}catch(e){document.getElementById('vo-st').textContent='Error';toast(e.message,'err');}}
 function setAst(num,cls,txt){const el=document.getElementById(`ast-${num}`);if(el){el.className='ast ast-'+cls;el.textContent=txt;}}
 
 // ── STAGE 3, STEP 6: ASSEMBLY ──
@@ -5435,6 +5449,20 @@ function dlAllSbHiRes(){
   toast('Downloading '+done.length+' frames…','info');
 }
 function dlAllVids(){const p=DB.getProject(S.pid);if(!p)return;(p.vidPrompts||[]).filter(vp=>S.vidState[vp.num]?.url).forEach((vp,i)=>setTimeout(()=>dlImg(S.vidState[vp.num].url,'S'+vp.num+'.mp4'),i*600));toast('Downloading...','info');}
+
+// ══════════════════════════════════════
+// API — ELEVENLABS (server-side proxy)
+// ══════════════════════════════════════
+async function elFetch(path,body){
+  const k=kE(); // client key as fallback if server has no env var
+  const r=await fetch('/api/elevenlabs',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path,body,clientKey:k||undefined})
+  });
+  if(!r.ok){const d=await r.json().catch(()=>({error:'EL error '+r.status}));throw new Error(d.error||'EL '+r.status);}
+  return r;
+}
 
 // ══════════════════════════════════════
 // SAVE INPUTS
