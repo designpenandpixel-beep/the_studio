@@ -104,7 +104,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 9998;
+  z-index: 1;
   opacity: 0.035;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
@@ -1544,9 +1544,47 @@ audio { width: 100%; height: 30px; margin-top: 7px; }
 /* ─────────────────────────────────────────
    RESPONSIVE
 ───────────────────────────────────────── */
+
+/* Tablet */
+@media (max-width: 1024px) {
+  .page { padding: 24px 20px; }
+  .model-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}
+
+/* Small tablet / large phone */
+@media (max-width: 768px) {
+  .app-bar { height: auto; min-height: 52px; flex-wrap: wrap; padding: 8px 16px; gap: 4px; }
+  .app-bar-nav { order: 3; width: 100%; margin-left: 0; padding: 4px 0; }
+  .app-bar-right { order: 2; }
+  .modal-box { padding: 20px; max-width: 100%; border-radius: var(--r2); }
+  .modal-wrap { padding: 10px; }
+  .tbl { font-size: 11px; }
+  .tbl th, .tbl td { padding: 8px 10px; }
+  .page-title { font-size: 20px; }
+  .dash-hero { padding: 20px; }
+  .dash-hero-greeting { font-size: 18px; }
+  .dash-hero-content { flex-direction: column; align-items: flex-start; }
+}
+
+/* Phone */
 @media (max-width: 640px) {
   .form2, .bible-grid, .form3, .shot-bd, .rules-grid { grid-template-columns: 1fr; }
-  .page { padding: 20px 16px; }
-  .app-bar { padding: 0 16px; }
-  .sc { padding: 16px; }
+  .page { padding: 16px 12px; }
+  .app-bar { padding: 6px 12px; }
+  .sc { padding: 12px; }
+  .nav-btn { font-size: 11px; padding: 5px 8px; height: 30px; }
+  .nav-btn svg { display: none; }
+  .btn { font-size: 11px; padding: 6px 12px; }
+  .btn-sm { padding: 4px 8px; font-size: 10px; }
+  .login-box { padding: 28px 20px; }
+  .sb-grid, .sbc-grid, .ag { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
+/* Small phone */
+@media (max-width: 400px) {
+  .app-bar-name { display: none; }
+  .app-bar-keys-btn { display: none; }
+  .dash-tiles { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .dash-tile { padding: 10px 8px; }
+  .dash-tile-num { font-size: 22px; }
 }

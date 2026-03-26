@@ -137,7 +137,20 @@ const VEO_RULES=[
 // DATA LAYER — in-memory cache + localStorage fallback + Supabase sync
 // ══════════════════════════════════════
 let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[];
-function _tryLS(fn){try{fn()}catch(e){}}
+function _tryLS(fn){try{fn()}catch(e){console.warn('localStorage error:',e.message);}}
+
+// Debounce utility — delays fn execution until wait ms after last call
+let _debounceTimers={};
+function debounceRender(key,ms){clearTimeout(_debounceTimers[key]);_debounceTimers[key]=setTimeout(()=>render(),ms||300);}
+
+// Safe password visibility toggle
+function togglePwVis(btn){
+  const code=btn?.previousElementSibling;
+  if(!code||!code.dataset.pw)return;
+  const masked='••••••••';
+  code.textContent=code.textContent===masked?code.dataset.pw:masked;
+  btn.textContent=code.textContent===masked?'👁':'👁‍🗨';
+}
 function _loadLS(){
   _tryLS(()=>{const u=localStorage.getItem('sv2_users');if(u)_users=JSON.parse(u)});
   _tryLS(()=>{const p=localStorage.getItem('sv2_projects');if(p)_projects=JSON.parse(p)});
@@ -168,7 +181,7 @@ const SB={
   _rh(){return{'apikey':this._key,'Authorization':'Bearer '+this._key,'Accept':'application/json'}},
   _wh(){return{'apikey':this._key,'Authorization':'Bearer '+this._key,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}},
   headers(){return this._wh()},
-  _updateDot(){const d=document.getElementById('sb-dot');if(!d)return;const m={ok:'var(--green)',error:'var(--red)',syncing:'#e0c070',unconfigured:'var(--b3)',saved:'#B8960C'};d.style.background=m[this._status]||'var(--b3)';const labels={ok:'Connected ✓',error:'Connection error',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — not verified'};d.title='Supabase: '+(labels[this._status]||this._status);},
+  _updateDot(){const d=document.getElementById('sb-dot');if(!d)return;const m={ok:'var(--green)',error:'var(--red)',syncing:'#FF8A5C',unconfigured:'var(--b3)',saved:'#FF6B35'};d.style.background=m[this._status]||'var(--b3)';const labels={ok:'Connected ✓',error:'Connection error',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — not verified'};d.title='Supabase: '+(labels[this._status]||this._status);},
   // Low-level REST
   async _get(table){
     if(!this.ready())return null;
@@ -523,7 +536,7 @@ function gcid(){let id;do{id='CLI'+String(Math.floor(Math.random()*9000)+1000)}w
 function genProjectId(){
   const d=new Date();const ymd=String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
   const existing=DB.getProjects().map(p=>p.projectId||'').filter(x=>x.startsWith('STU-'+ymd));
-  const nums=existing.map(x=>parseInt(x.slice(-4))||0);
+  const nums=existing.map(x=>parseInt(x.slice(-4),10)||0);
   const next=nums.length?Math.max(...nums)+1:1;
   return 'STU-'+ymd+'-'+String(next).padStart(4,'0');
 }
@@ -777,7 +790,7 @@ ${[
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
-<input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};render()" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
+<input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};debounceRender('dash')" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Creator</div>
 <select onchange="S.dashF={...S.dashF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(c=>`<option value="${c.id}"${df.creator===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -905,7 +918,7 @@ function adminProjects(){
 
   const filterBar=`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input type="text" placeholder="Search name, ID, client…" value="${esc(df.q)}" oninput="S.projF={...S.projF||{},q:this.value};render()" style="flex:1;min-width:140px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
+<input type="text" placeholder="Search name, ID, client…" value="${esc(df.q)}" oninput="S.projF={...S.projF||{},q:this.value};debounceRender('proj')" style="flex:1;min-width:140px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
 <select onchange="S.projF={...S.projF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(cr=>`<option value="${cr.id}"${df.creator===cr.id?' selected':''}>${esc(cr.name)}</option>`).join('')}</select>
 <select onchange="S.projF={...S.projF||{},client:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
@@ -1000,16 +1013,16 @@ function kanbanCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
   const now=new Date();const isOverdue=p.deadline&&new Date(p.deadline)<now&&p.workflowStatus!=='complete';
   const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-  const priColors={high:'#c04a4a',medium:'#B8960C',low:'#3a3a3a'};
+  const priColors={high:'#c04a4a',medium:'#FF6B35',low:'#3a3a3a'};
   const priLabels={high:'HIGH',medium:'MED',low:'LOW'};
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const unread=getUnreadCommentCount(p,S.session?.userId);
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(p.workflowStatus||'new')+1)/6*100);
-  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'#B8960C33':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
+  return`<div style="background:var(--bg3);border:1px solid ${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:8px;overflow:hidden;cursor:pointer;transition:all .15s"
   onmouseover="this.style.borderColor='${accent}44';this.style.transform='translateY(-1px)'"
-  onmouseout="this.style.borderColor='${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'#B8960C33':'var(--b1)'}';this.style.transform=''"
+  onmouseout="this.style.borderColor='${isOverdue?'#c04a4a55':isAtRisk?'#e0a02033':alert?'rgba(255,107,53,0.18)':'var(--b1)'}';this.style.transform=''"
   onclick="S.detailPid='${p.id}';S.tab='projects';render()">
 <!-- Type accent bar -->
 <div style="height:3px;background:${accent};opacity:0.8"></div>
@@ -1035,7 +1048,7 @@ ${(p.tags||[]).length?`<div style="display:flex;gap:3px;flex-wrap:wrap;margin:4p
 </div>
 <!-- Footer: deadline + badges + actions -->
 <div style="display:flex;justify-content:space-between;align-items:center">
-<span style="font-size:8px;color:${isOverdue?'var(--red)':isAtRisk?'#e0c070':'var(--t4)'}">${
+<span style="font-size:8px;color:${isOverdue?'var(--red)':isAtRisk?'#FF8A5C':'var(--t4)'}">${
   isOverdue?'⚠ Overdue':
   isAtRisk?'⚡ '+daysBetween(new Date().toISOString(),p.deadline)+'d left':
   p.deadline?'📅 '+new Date(p.deadline).toLocaleDateString():''
@@ -1061,7 +1074,7 @@ ${projects.map(p=>{
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
   const progress=Math.round((['brief_submitted','synopsis_review','synopsis_locked','storyboard_in_progress','storyboard_review','complete'].indexOf(wf)+1)/6*100);
-  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'#c04a4a33':alert?'#B8960C33':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
+  return`<div style="background:var(--bg2);border:1px solid ${isOverdue?'#c04a4a33':alert?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:10px;overflow:hidden;cursor:pointer;transition:all .15s" onclick="S.detailPid='${p.id}';render()" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform=''">
 <div style="padding:12px 14px;border-bottom:1px solid var(--b1)">
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:7px">
 <div style="font-size:16px">${mt?.icon||'?'}</div>
@@ -1138,7 +1151,7 @@ function projDetailPage(p){
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 <span style="font-size:18px">${mt?.icon||'?'}</span>
 <div style="font-size:17px;font-weight:700;color:#fff">${esc(p.name)}</div>
-<code style="font-size:10px;color:var(--gold);background:#1a1000;border:1px solid #B8960C33;padding:2px 8px;border-radius:10px">${p.projectId||'—'}</code>
+<code style="font-size:10px;color:var(--gold);background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);padding:2px 8px;border-radius:10px">${p.projectId||'—'}</code>
 ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH</span>',low:'<span style="font-size:9px;color:var(--t4)">○ LOW</span>'}[p.priority||'']||''}
 </div>
 </div>
@@ -1150,14 +1163,14 @@ ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH<
 </div></div>
 
 ${isOverdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(p.deadline)} days overdue.</strong> Deadline was ${new Date(p.deadline).toLocaleDateString()}.</div>`:''}
-${atRisk?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#e0c070">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
+${atRisk?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 14px;margin-bottom:14px;font-size:10px;color:#FF8A5C">⚡ Deadline in <strong>${daysBetween(now.toISOString(),p.deadline)} days</strong> — ${new Date(p.deadline).toLocaleDateString()}</div>`:''}
 
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
 ${[
   {l:'Status',v:wf.replace(/_/g,' '),c:wf==='complete'?'var(--green)':wf.includes('review')?'var(--gold)':'var(--t2)'},
   {l:'Progress',v:progress+'%',c:'var(--green)'},
   {l:'Priority',v:(p.priority||'medium').toUpperCase(),c:{high:'var(--red)',medium:'var(--gold)',low:'var(--t4)'}[p.priority||'medium']},
-  {l:'Deadline',v:p.deadline?new Date(p.deadline).toLocaleDateString():'Not set',c:isOverdue?'var(--red)':atRisk?'#e0c070':'var(--t3)'},
+  {l:'Deadline',v:p.deadline?new Date(p.deadline).toLocaleDateString():'Not set',c:isOverdue?'var(--red)':atRisk?'#FF8A5C':'var(--t3)'},
 ].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;text-align:center">
 <div style="font-size:15px;font-weight:700;color:${s.c}">${s.v}</div>
 <div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-top:3px">${s.l}</div></div>`).join('')}
@@ -1298,7 +1311,7 @@ function adminClients(){
   return`<tr>
 <td><div class="urow"><div class="uav uav-client">${(c.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
 <td><code style="color:var(--purple);font-size:10px">${c.clientId||'—'}</code></td>
-<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="this.previousElementSibling.textContent=this.previousElementSibling.textContent==='••••••••'?this.previousElementSibling.dataset.pw:'••••••••';this.textContent=this.textContent==='👁'?'👁‍🗨':'👁'" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
+<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${pcount}</span></td>
 <td><span style="font-size:10px;color:${emp?'var(--blue)':'var(--t4)'}">${emp?esc(emp.name):'Unassigned'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
@@ -1324,7 +1337,7 @@ function adminCreators(){
   return`<tr>
 <td><div class="urow"><div class="uav uav-creator">${(e.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.email||'')}</div></div></div></td>
 <td><code style="color:var(--blue);font-size:10px">${esc(e.username||e.name)}</code></td>
-<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(e.password)}">••••••••</code><button onclick="this.previousElementSibling.textContent=this.previousElementSibling.textContent==='••••••••'?this.previousElementSibling.dataset.pw:'••••••••';this.textContent=this.textContent==='👁'?'👁‍🗨':'👁'" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
+<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(e.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${assigned}</span></td>
 <td><span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span></td>
 <td><div style="display:flex;gap:4px">
@@ -1387,8 +1400,8 @@ ${intg.notes?`<div style="font-size:9px;color:var(--t3);margin-bottom:6px">${esc
 </div>`:''}
 <div class="section-lbl">Add from Presets</div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat==='all'?'#1a1000':'var(--bg3)'};color:${selCat==='all'?'var(--gold)':'var(--t4)'};border:1px solid ${selCat==='all'?'#B8960C44':'var(--b1)'}" onclick="S.intCat='all';render()">All</div>
-${cats.map(cat=>`<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat===cat?'#1a1000':'var(--bg3)'};color:${selCat===cat?'var(--gold)':'var(--t4)'};border:1px solid ${selCat===cat?'#B8960C44':'var(--b1)'}" onclick="S.intCat='${cat}';render()">${cat}</div>`).join('')}
+<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat==='all'?'#1a0f1e':'var(--bg3)'};color:${selCat==='all'?'var(--gold)':'var(--t4)'};border:1px solid ${selCat==='all'?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.intCat='all';render()">All</div>
+${cats.map(cat=>`<div style="padding:3px 9px;border-radius:10px;font-size:9px;font-weight:700;cursor:pointer;background:${selCat===cat?'#1a0f1e':'var(--bg3)'};color:${selCat===cat?'var(--gold)':'var(--t4)'};border:1px solid ${selCat===cat?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.intCat='${cat}';render()">${cat}</div>`).join('')}
 </div>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px">
 ${INTEGRATION_PRESETS.filter(p=>selCat==='all'||p.cat===selCat).map(preset=>{const already=intgs.find(x=>x.name===preset.name);return`<div style="background:var(--bg2);border:1px solid ${already?'#4ac04a22':'var(--b1)'};border-radius:7px;padding:10px">
@@ -1454,7 +1467,7 @@ function sComments(p){
   const topLevel=comments.filter(cm=>!cm.replyTo);
   const repliesFor=id=>comments.filter(cm=>cm.replyTo===id);
   const roleColor={admin:'var(--gold)',creator:'var(--blue)'};
-  const avatarBg={admin:'#1a1000',creator:'#050d18'};
+  const avatarBg={admin:'#1a0f1e',creator:'#0a0a18'};
 
   function renderComment(cm,isReply){
     const isOwn=cm.authorId===uid;
@@ -1599,7 +1612,7 @@ function copyCommentLink(cmId){
 // ══════════════════════════════════════
 const WF_STAGES=[
   {id:'new',label:'Created',color:'#3a3a3a',short:'New'},
-  {id:'brief_submitted',label:'Brief',color:'#B8960C',short:'Brief'},
+  {id:'brief_submitted',label:'Brief',color:'#FF6B35',short:'Brief'},
   {id:'synopsis_review',label:'Synopsis',color:'#4a8fc0',short:'Synopsis'},
   {id:'synopsis_locked',label:'Approved',color:'#2ac09a',short:'Approved'},
   {id:'storyboard_in_progress',label:'Storyboard',color:'#8a6fd4',short:'Board'},
@@ -1652,7 +1665,7 @@ function sProjectTimeline(p){
 ${[
   {l:'Days Active',v:totalDays+'d',c:'var(--gold)'},
   {l:'Current Stage',v:stageLabel(p.workflowStatus||'new'),c:stageColor(p.workflowStatus||'new')},
-  {l:'Deadline',v:deadline?new Date(deadline).toLocaleDateString():'Not set',c:overdue?'var(--red)':atRisk?'#e0c070':'var(--t3)'},
+  {l:'Deadline',v:deadline?new Date(deadline).toLocaleDateString():'Not set',c:overdue?'var(--red)':atRisk?'#FF8A5C':'var(--t3)'},
   {l:'Progress',v:progress+'%',c:'var(--green)'},
 ].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;text-align:center">
 <div style="font-size:20px;font-weight:700;color:${s.c}">${s.v}</div>
@@ -1660,7 +1673,7 @@ ${[
 </div>
 
 ${overdue?`<div style="background:#100404;border:1px solid #c04a4a44;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--red)">⚠ This project is <strong>${daysFrom(deadline)} days overdue.</strong> Deadline was ${new Date(deadline).toLocaleDateString()}.</div>`:''}
-${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#e0c070">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
+${atRisk&&!overdue?`<div style="background:#120d00;border:1px solid #e0a02044;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:#FF8A5C">⚡ Deadline approaching — <strong>${daysBetween(now,deadline)} days remaining.</strong></div>`:''}
 
 <div style="margin-bottom:18px">
 <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t4);margin-bottom:5px">
@@ -1691,7 +1704,7 @@ ${seg.isActive?`<span style="font-size:8px;background:${seg.color}22;color:${seg
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
 <input type="date" id="ph-deadline" value="${p.deadline||''}" style="background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:7px 10px;border-radius:5px;font-size:11px" onchange="saveInputs()"/>
 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ph-deadline').value='';saveInputs()">Clear</button>
-${deadline?`<span style="font-size:10px;color:${overdue?'var(--red)':atRisk?'#e0c070':'var(--green)'}">${overdue?'⚠ Overdue by '+daysFrom(deadline)+'d':atRisk?'⚡ '+daysBetween(now,deadline)+'d remaining':'✓ '+daysBetween(now,deadline)+'d remaining'}</span>`:''}
+${deadline?`<span style="font-size:10px;color:${overdue?'var(--red)':atRisk?'#FF8A5C':'var(--green)'}">${overdue?'⚠ Overdue by '+daysFrom(deadline)+'d':atRisk?'⚡ '+daysBetween(now,deadline)+'d remaining':'✓ '+daysBetween(now,deadline)+'d remaining'}</span>`:''}
 </div>`;
 }
 
@@ -1831,13 +1844,13 @@ function adminTimeline(){
 </div></div>
 
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:9px 12px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input type="text" placeholder="Search..." value="${esc(gf.q)}" oninput="S.tlFilter={...S.tlFilter||{},q:this.value};render()" style="flex:1;min-width:120px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
+<input type="text" placeholder="Search..." value="${esc(gf.q)}" oninput="S.tlFilter={...S.tlFilter||{},q:this.value};debounceRender('tl')" style="flex:1;min-width:120px;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/>
 <select onchange="S.tlFilter={...S.tlFilter||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(cr=>`<option value="${cr.id}"${gf.creator===cr.id?' selected':''}>${esc(cr.name)}</option>`).join('')}</select>
 <select onchange="S.tlFilter={...S.tlFilter||{},status:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Stages</option>${WF_STAGES.map(s=>`<option value="${s.id}"${gf.status===s.id?' selected':''}>${s.label}</option>`).join('')}</select>
 <span style="font-size:9px;color:var(--t4)">View:</span>
-${[14,30,60,90].map(d=>`<div style="padding:3px 8px;border-radius:8px;font-size:9px;font-weight:700;cursor:pointer;background:${(S.tlRange||60)===d?'#1a1000':'var(--bg3)'};color:${(S.tlRange||60)===d?'var(--gold)':'var(--t4)'};border:1px solid ${(S.tlRange||60)===d?'#B8960C44':'var(--b1)'}" onclick="S.tlRange=${d};S.tlOffset=0;render()">${d}d</div>`).join('')}
+${[14,30,60,90].map(d=>`<div style="padding:3px 8px;border-radius:8px;font-size:9px;font-weight:700;cursor:pointer;background:${(S.tlRange||60)===d?'#1a0f1e':'var(--bg3)'};color:${(S.tlRange||60)===d?'var(--gold)':'var(--t4)'};border:1px solid ${(S.tlRange||60)===d?'rgba(255,107,53,0.25)':'var(--b1)'}" onclick="S.tlRange=${d};S.tlOffset=0;render()">${d}d</div>`).join('')}
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=(S.tlOffset||0)-(S.tlRange||60)*0.4;render()">‹ Earlier</button>
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=Math.min(0,(S.tlOffset||0)+(S.tlRange||60)*0.4);render()">Later ›</button>
 <button class="btn btn-ghost btn-sm" onclick="S.tlOffset=0;render()">Today</button>
@@ -1848,7 +1861,7 @@ ${WF_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:4px;font-siz
 <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:var(--t3);margin-left:8px"><div style="width:10px;height:10px;background:#4ac04a;clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%)"></div>Deadline</div>
 <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:var(--t3)"><div style="width:1px;height:12px;background:var(--red)"></div>Today</div>
 ${ps.filter(p=>p.deadline&&new Date(p.deadline)<now).length?`<span style="margin-left:8px;font-size:9px;color:var(--red);font-weight:700">⚠ ${ps.filter(p=>p.deadline&&new Date(p.deadline)<now).length} overdue</span>`:''}
-${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length?`<span style="font-size:9px;color:#e0c070;font-weight:700">⚡ ${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length} due this week</span>`:''}
+${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length?`<span style="font-size:9px;color:#FF8A5C;font-weight:700">⚡ ${ps.filter(p=>p.deadline&&new Date(p.deadline)>=now&&new Date(p.deadline)<new Date(Date.now()+7*864e5)).length} due this week</span>`:''}
 </div>
 
 ${filtered.length===0?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:40px;text-align:center;color:var(--t4)">No projects match the filter.</div>`:`
@@ -1957,7 +1970,7 @@ function trendingStylesPanel(p){
   const selected=S.selectedTrends||[];
   const typeColors={trend:'var(--gold)',skill:'var(--blue)',creator:'var(--purple)',workflow:'var(--green)'};
   const typeIcons={trend:'📈',skill:'🎯',creator:'👁',workflow:'⚙'};
-  return`<div style="background:#080a00;border:1px solid #B8960C44;border-radius:9px;padding:13px;margin-bottom:14px">
+  return`<div style="background:#0e0a18;border:1px solid rgba(255,107,53,0.25);border-radius:9px;padding:13px;margin-bottom:14px">
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
 <div style="display:flex;align-items:center;gap:7px">
 <span style="font-size:14px">✦</span>
@@ -2027,12 +2040,12 @@ ${['trend','skill','creator','workflow'].map(t=>`<div style="background:var(--bg
 
 <!-- Filter -->
 <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
-<input type="text" placeholder="Search…" value="${esc(ldFilter.q)}" oninput="S.ldFilter={...S.ldFilter,q:this.value};render()" style="flex:1;min-width:150px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:6px 9px;border-radius:5px;font-size:10px"/>
+<input type="text" placeholder="Search…" value="${esc(ldFilter.q)}" oninput="S.ldFilter={...S.ldFilter,q:this.value};debounceRender('ld')" style="flex:1;min-width:150px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:6px 9px;border-radius:5px;font-size:10px"/>
 ${['','trend','skill','creator','workflow'].map(t=>`<button onclick="S.ldFilter={...S.ldFilter,type:'${t}'};render()" style="background:${ldFilter.type===t?'var(--bg2)':'var(--bg3)'};border:1px solid ${ldFilter.type===t?'var(--gold)':'var(--b2)'};color:${ldFilter.type===t?'var(--gold)':'var(--t4)'};padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px">${t||'All'}</button>`).join('')}
 </div>
 
 <!-- Trend Agent status -->
-<div id="ld-agent-status" style="display:none;background:#080a00;border:1px solid #B8960C33;border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--gold)"></div>
+<div id="ld-agent-status" style="display:none;background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:7px;padding:10px 13px;margin-bottom:12px;font-size:10px;color:var(--gold)"></div>
 
 <!-- Entries grid -->
 ${filtered.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">
@@ -2447,7 +2460,7 @@ async function startLoRATraining(id){
   const urls=document.getElementById('lora-urls')?.value.trim().split('\n').map(u=>u.trim()).filter(u=>u.startsWith('http'));
   if(urls.length<3){toast('Add at least 3 image URLs','err');return;}
   const trigger=document.getElementById('lora-trigger')?.value.trim()||'custom_style';
-  const steps=parseInt(document.getElementById('lora-steps')?.value)||1000;
+  const steps=parseInt(document.getElementById('lora-steps')?.value,10)||1000;
   const statusEl=document.getElementById('lora-status');
   if(statusEl){statusEl.style.display='block';statusEl.textContent='Submitting training job to fal.ai…';}
   try{
@@ -2496,7 +2509,7 @@ function adminSettings(){
   const sbUrl=localStorage.getItem('sb_url')||'';
   const sbKey=localStorage.getItem('sb_key')||'';
   const sbStatus=SB._status;
-  const sbStatusColor={ok:'var(--green)',error:'var(--red)',syncing:'#e0c070',unconfigured:'var(--t4)',saved:'var(--gold)'}[sbStatus]||'var(--t4)';
+  const sbStatusColor={ok:'var(--green)',error:'var(--red)',syncing:'#FF8A5C',unconfigured:'var(--t4)',saved:'var(--gold)'}[sbStatus]||'var(--t4)';
   const sbStatusLabel={ok:'Connected ✓',error:'Error — check URL/key',syncing:'Syncing…',unconfigured:'Not configured',saved:'Saved — click Test Connection'}[sbStatus]||sbStatus;
   return`<div class="page"><div class="page-title">Settings</div><div class="page-sub">API keys, database, and account management — admin only</div>
 ${(()=>{
@@ -2595,7 +2608,7 @@ function sbKeyHint(inp){
   const v=inp.value.trim();const el=document.getElementById('sb-key-hint');if(!el)return;
   if(!v){el.style.color='var(--t4)';el.textContent='Paste from Supabase Dashboard → Settings → API → anon public';return;}
   if(!v.startsWith('eyJ')){el.style.color='var(--red)';el.textContent='✗ Should start with eyJ — this looks like the wrong value';return;}
-  if(v.length<100){el.style.color='#e0c070';el.textContent='⚠ Key seems short ('+v.length+' chars) — the real anon key is ~200 chars';return;}
+  if(v.length<100){el.style.color='#FF8A5C';el.textContent='⚠ Key seems short ('+v.length+' chars) — the real anon key is ~200 chars';return;}
   el.style.color='var(--green)';el.textContent='✓ Key format looks correct ('+v.length+' chars)';
 }
 async function sbTest(){
@@ -2939,8 +2952,8 @@ ${sorted.length?sorted.map(p=>creatorProjCard(p)).join(''):'<div style="color:va
 
 function creatorProjCard(p){
   const mt=MT[p.type];const cl=DB.getUser(p.clientId);const wf=p.workflowStatus||'new';const alert=p.newBrief||p.pendingFeedback;
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   const revs=p.synopsisRevisions||[];const hasSyn=revs.length>0;
   const brief={...p.clientBrief,...p.brief};const briefKeys=Object.keys(brief).filter(k=>brief[k]&&k!=='videoRefUrl'&&k!=='additionalNotes');
   const unread=getUnreadCommentCount(p,S.session?.userId);
@@ -3007,8 +3020,8 @@ function creatorProjectDetail(p){
   const brief={...p.clientBrief,...p.brief};
   const revs=p.synopsisRevisions||[];
   const clAssets=cl?.brandAssets||[];
-  const typeAccents={gold:'#B8960C',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
-  const accent=typeAccents[mt?.color||'gold']||'#B8960C';
+  const typeAccents={gold:'#FF6B35',purple:'#8a6fd4',red:'#c04a4a',blue:'#4a8fc0',teal:'#2ac09a',green:'#4ac04a',pink:'#d45aaa',coral:'#e06040'};
+  const accent=typeAccents[mt?.color||'gold']||'#FF6B35';
   return`<div class="page">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
 <button class="btn btn-ghost btn-sm" onclick="S.creatorDetailPid=null;render()">← My Projects</button>
@@ -3052,7 +3065,7 @@ ${p.clientRefs.map(r=>r.preview?`<img src="${r.preview}" style="width:64px;heigh
 <!-- Synopsis versions -->
 <div class="section-lbl">Synopsis History ${p.synopsisLocked?'<span class="badge badge-green">Approved ✓</span>':''}</div>
 ${revs.length?`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:420px;overflow-y:auto">
-${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0a0800':'var(--bg2)'};border:1px solid ${i===revs.length-1?'#B8960C33':'var(--b1)'};border-radius:7px;padding:12px">
+${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0e0a18':'var(--bg2)'};border:1px solid ${i===revs.length-1?'rgba(255,107,53,0.18)':'var(--b1)'};border-radius:7px;padding:12px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
 <span style="font-size:9px;font-weight:700;color:${i===revs.length-1?'var(--gold)':'var(--t4)'}">Version ${r.version} ${i===revs.length-1?'· Latest':''}</span>
 <span style="font-size:8px;color:var(--t4)">${r.timestamp?new Date(r.timestamp).toLocaleDateString():''}</span>
@@ -3114,7 +3127,7 @@ function creatorInbox(){
 <div><div class="page-title">Inbox</div><div class="page-sub">${notifs.length} notifications · ${unread} unread</div></div>
 ${unread?`<button class="btn btn-ghost btn-sm" onclick="DB.markAllRead('${uid}');render()">Mark all read</button>`:''}
 </div>
-${notifs.length?notifs.map(n=>{const typeColors={brief:'#B8960C44',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'#B8960C22'};const col=typeColors[n.type]||'var(--b1)';
+${notifs.length?notifs.map(n=>{const typeColors={brief:'rgba(255,107,53,0.25)',synopsis:'#4a8fc033',approval:'#4ac04a33',storyboard:'#8a6fd433',feedback:'#c04a4a44',revision:'#c04a4a44',project:'rgba(255,107,53,0.12)'};const col=typeColors[n.type]||'var(--b1)';
 return`<div style="background:var(--bg2);border:1px solid ${col};border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;opacity:${n.read?.7:1}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}');render()">
 <div style="width:8px;height:8px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:4px"></div>
 <div style="flex:1"><div style="font-size:11px;font-weight:700;color:${n.read?'var(--t2)':'#fff'}">${esc(n.title)}</div>
@@ -3349,7 +3362,7 @@ ${q.t==='select'?`<select id="bans" style="width:100%;max-width:380px;font-size:
 q.t==='textarea'?`<textarea id="bans" rows="4" style="width:100%;font-size:12px;padding:10px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px;font-family:Arial,sans-serif;resize:vertical" placeholder="${q.hint||''}">${esc((S.bAnswers||{})[q.id]||'')}</textarea>`:
 `<input type="text" id="bans" value="${esc((S.bAnswers||{})[q.id]||'')}" placeholder="${q.hint||q.q}" style="width:100%;max-width:480px;font-size:13px;padding:10px 12px;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);border-radius:7px" onkeydown="if(event.key==='Enter')advanceBrief()"/>`}
 <!-- AI Assistant panel -->
-<div id="ai-help-panel" style="display:none;margin-top:14px;background:#0a0800;border:1px solid #B8960C33;border-radius:8px;padding:13px">
+<div id="ai-help-panel" style="display:none;margin-top:14px;background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:8px;padding:13px">
 <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
 <span style="font-size:12px">✦</span><span style="font-size:10px;font-weight:700;color:var(--gold)">Claude Assistant</span>
 <button onclick="document.getElementById('ai-help-panel').style.display='none'" style="background:none;border:none;color:var(--t4);cursor:pointer;margin-left:auto;font-size:13px">✕</button>
@@ -3395,7 +3408,7 @@ async function briefAiHelp(){
     textEl.innerHTML=esc(parts[0].trim()).replace(/\n/g,'<br>');
     if(parts[1]){
       S.briefAiSuggestion=parts[1].trim();
-      textEl.innerHTML+=`<div style="margin-top:10px;padding:8px 10px;background:#1a1000;border:1px solid #B8960C33;border-radius:5px;font-size:10px;color:var(--gold)"><strong>Suggested answer:</strong> ${esc(S.briefAiSuggestion)}</div>`;
+      textEl.innerHTML+=`<div style="margin-top:10px;padding:8px 10px;background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);border-radius:5px;font-size:10px;color:var(--gold)"><strong>Suggested answer:</strong> ${esc(S.briefAiSuggestion)}</div>`;
     }
   }catch(e){
     loadEl.style.display='none';
@@ -3558,7 +3571,7 @@ function showAssignClientsModal(empId){
   const assigned=new Set(emp.assignedClients||[]);
   openModal(`<div class="modal-title">Assign Clients — ${esc(emp.name)}</div>
 <div style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;margin-bottom:12px">
-${clients.map(c=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border:1px solid ${assigned.has(c.id)?'#B8960C44':'var(--b1)'};border-radius:6px;cursor:pointer">
+${clients.map(c=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border:1px solid ${assigned.has(c.id)?'rgba(255,107,53,0.25)':'var(--b1)'};border-radius:6px;cursor:pointer">
 <input type="checkbox" id="ac-${c.id}" ${assigned.has(c.id)?'checked':''} style="accent-color:var(--gold)"/>
 <div><div style="font-size:11px;color:#fff">${esc(c.name)}</div><div style="font-size:9px;color:var(--t4)">${c.clientId||''}</div></div>
 </label>`).join('')}
@@ -3693,7 +3706,7 @@ function studioWrap(){
 <button class="btn btn-ghost btn-sm" onclick="S.tab='${S.view==='admin'?'projects':'dashboard'}';S.pid=null;render()">← Back</button>
 <div style="flex:1;min-width:120px;display:flex;align-items:baseline;gap:7px">
 <input id="ph-n" value="${esc(p.name)}" style="background:transparent;border:none;color:#fff;font-size:13px;font-weight:700" onblur="saveInputs()"/>
-${p.projectId?`<span style="font-size:9px;font-weight:700;color:var(--gold);font-family:monospace;background:#1a1000;border:1px solid #B8960C33;padding:2px 7px;border-radius:11px">${p.projectId}</span>`:''}
+${p.projectId?`<span style="font-size:9px;font-weight:700;color:var(--gold);font-family:monospace;background:#1a0f1e;border:1px solid rgba(255,107,53,0.18);padding:2px 7px;border-radius:11px">${p.projectId}</span>`:''}
 </div>
 ${cl?`<span class="badge badge-purple">${esc(cl.clientId||'')}</span><span style="font-size:10px;color:var(--t3)">${esc(cl.name)}</span>`:''}
 <select id="ph-wf" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:4px 7px;border-radius:4px;font-size:9px" onchange="saveInputs()">
@@ -3701,7 +3714,7 @@ ${['new','brief_submitted','synopsis_review','synopsis_locked','storyboard_in_pr
 </select>
 <div style="display:flex;align-items:center;gap:4px">
 <span style="font-size:8px;color:var(--t4);text-transform:uppercase">Deadline</span>
-<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0a02044':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0c070':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
+<input type="date" id="ph-deadline" value="${p.deadline||''}" onchange="saveInputs()" style="background:var(--bg4);border:1px solid ${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#e0a02044':'var(--b2)'};color:${p.deadline&&new Date(p.deadline)<new Date()?'var(--red)':p.deadline&&new Date(p.deadline)<new Date(Date.now()+7*864e5)?'#FF8A5C':'var(--t1)'};padding:3px 7px;border-radius:4px;font-size:9px"/>
 </div>
 ${wf==='brief_submitted'||p.newBrief?`<button class="btn btn-gold btn-sm" onclick="genSynopsis()">✦ Generate Synopsis</button>`:''}
 ${p.type==='design'?`<button class="btn btn-purple btn-sm" onclick="openCanvaForDesign('${p.id}')">🎨 Open in Canva</button>`:'' }
@@ -3822,7 +3835,7 @@ function writerSelector(p){
 <span style="font-size:8px;color:var(--gold);margin-left:auto">Active: ${active.icon} ${active.n}</span>
 </div>
 <div style="display:flex;gap:6px;flex-wrap:wrap">
-${WRITER_TYPES.map(w=>`<button onclick="S.writerId='${w.id}';const pp=DB.getProject(S.pid);if(pp){pp.writerId='${w.id}';DB.saveProject(pp);}render()" style="background:${current===w.id?'#1a1000':'var(--bg3)'};border:1px solid ${current===w.id?'var(--gold)':'var(--b2)'};color:${current===w.id?'var(--gold)':'var(--t3)'};padding:5px 10px;border-radius:6px;cursor:pointer;font-size:9px;display:flex;align-items:center;gap:4px;transition:all 0.15s" title="${esc(w.desc)}"><span>${w.icon}</span><span style="font-weight:${current===w.id?'700':'400'}">${w.n}</span></button>`).join('')}
+${WRITER_TYPES.map(w=>`<button onclick="S.writerId='${w.id}';const pp=DB.getProject(S.pid);if(pp){pp.writerId='${w.id}';DB.saveProject(pp);}render()" style="background:${current===w.id?'#1a0f1e':'var(--bg3)'};border:1px solid ${current===w.id?'var(--gold)':'var(--b2)'};color:${current===w.id?'var(--gold)':'var(--t3)'};padding:5px 10px;border-radius:6px;cursor:pointer;font-size:9px;display:flex;align-items:center;gap:4px;transition:all 0.15s" title="${esc(w.desc)}"><span>${w.icon}</span><span style="font-weight:${current===w.id?'700':'400'}">${w.n}</span></button>`).join('')}
 </div>
 <div style="font-size:8px;color:var(--t4);margin-top:6px;line-height:1.4">${active.icon} <strong>${active.n}</strong> — ${active.desc}${current==='auto'?` (auto-selected for ${MT[p.type]?.label||'this project'})`:''}</div>
 </div>`;
@@ -3837,10 +3850,10 @@ ${writerSelector(p)}
 </div>
 ${latest?voiceReaderBar('synopsis',latest.text):''}
 <div class="ai-load" id="syn-load"><div class="spinner"></div>Generating synopsis...</div>
-${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0a0800':'var(--bg3)'};border:1px solid ${i===revs.length-1?'#B8960C22':'var(--b1)'};border-radius:7px;padding:13px;margin-bottom:8px">
+${revs.map((r,i)=>`<div style="background:${i===revs.length-1?'#0e0a18':'var(--bg3)'};border:1px solid ${i===revs.length-1?'rgba(255,107,53,0.12)':'var(--b1)'};border-radius:7px;padding:13px;margin-bottom:8px">
 <div style="font-size:9px;color:var(--t4);margin-bottom:6px;display:flex;justify-content:space-between">
 <span>Version ${r.version}${r.timestamp?' — '+new Date(r.timestamp).toLocaleDateString():''}</span>
-${r.feedback?`<span style="color:#B8960C88">FB: "${esc(r.feedback.substring(0,40))}"</span>`:'<span style="color:var(--t4)">Original</span>'}
+${r.feedback?`<span style="color:rgba(255,107,53,0.5)">FB: "${esc(r.feedback.substring(0,40))}"</span>`:'<span style="color:var(--t4)">Original</span>'}
 </div>
 <div style="font-size:11px;color:var(--t2);line-height:1.9;white-space:pre-wrap">${esc(r.text)}</div>
 </div>`).join('')}
@@ -3945,7 +3958,7 @@ function renderComplianceResult(text){
     if(!line.trim())return'';
     const pass=line.includes('✅');const fail=line.includes('❌');const verdict=line.toUpperCase().includes('VERDICT');
     const col=pass?'var(--green)':fail?'var(--red)':verdict?'var(--gold)':'var(--t2)';
-    const bg=fail?'#1a0000':verdict?'#0a0800':'transparent';
+    const bg=fail?'#1a0000':verdict?'#0e0a18':'transparent';
     const hasFixBtn=fail?`<button onclick="fixComplianceLine('${esc(line.replace(/'/g,"\'"))}')" style="margin-left:8px;background:none;border:1px solid var(--red);color:var(--red);font-size:7px;padding:1px 5px;border-radius:3px;cursor:pointer;flex-shrink:0">Fix</button>`:'';
     return`<div style="padding:4px 6px;color:${col};font-weight:${verdict?'700':'400'};background:${bg};border-radius:3px;display:flex;align-items:flex-start;gap:4px">${esc(line)}${hasFixBtn}</div>`;
   }).join('');
@@ -3966,11 +3979,11 @@ function renderScriptTable(script){
       if(!inTable){
         html+=`<div style="overflow-x:auto;margin-bottom:2px"><table style="width:100%;border-collapse:collapse;font-size:10px">
 <thead><tr>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase;white-space:nowrap;width:70px">Time</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">Visual</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">VO / Dialogue</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">SFX / Music</th>
-<th style="background:#1a1000;color:var(--gold);padding:5px 8px;border:1px solid #2a2000;font-size:8px;text-transform:uppercase">Super</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase;white-space:nowrap;width:70px">Time</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">Visual</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">VO / Dialogue</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">SFX / Music</th>
+<th style="background:#1a0f1e;color:var(--gold);padding:5px 8px;border:1px solid #2A2A40;font-size:8px;text-transform:uppercase">Super</th>
 </tr></thead><tbody>`;
         inTable=true;
       }
@@ -3980,7 +3993,7 @@ function renderScriptTable(script){
       const tc=timeMatch[1];
       const visual=parts[0]||'';const vo=parts[1]||'—';const sfx=parts[2]||'—';const sup=parts[3]||'—';
       const isPack=trimmed.toUpperCase().includes('PACK SHOT')||trimmed.toUpperCase().includes('LOGO CARD');
-      const bg=isPack?'#080a00':'var(--bg2)';
+      const bg=isPack?'#0e0a18':'var(--bg2)';
       html+=`<tr style="background:${bg}">
 <td style="padding:6px 8px;border:1px solid #222;color:var(--gold);font-weight:700;white-space:nowrap;vertical-align:top">[${esc(tc)}]</td>
 <td style="padding:6px 8px;border:1px solid #222;color:var(--t1);vertical-align:top;line-height:1.5">${esc(visual)}</td>
@@ -4416,7 +4429,7 @@ function sShots(p,mt){
   return`<div class="ptitle">Shot List</div><div class="psub">${shots.length} shots</div>
 <div class="btn-row" style="margin-bottom:10px"><button class="btn btn-gold" onclick="genShots()" id="btn-gen-sh">✦ Generate</button><button class="btn btn-ghost btn-sm" onclick="addShot()">+ Add</button><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button></div>
 <div class="ai-load" id="sh-load"><div class="spinner"></div>Generating shots...</div>
-${shots.map((s,i)=>`<div class="shot-row"><div class="shot-hd"><span class="sn2">S${s.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:#B8960C77;font-weight:700;text-transform:uppercase;flex:1">${esc(s.scene||'')}</span><span style="font-size:9px;color:var(--t4)">${esc(s.type||'')}</span><button onclick="rmShot(${i})" style="background:none;border:none;color:var(--b3);cursor:pointer;font-size:12px">✕</button></div>
+${shots.map((s,i)=>`<div class="shot-row"><div class="shot-hd"><span class="sn2">S${s.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:rgba(255,107,53,0.45);font-weight:700;text-transform:uppercase;flex:1">${esc(s.scene||'')}</span><span style="font-size:9px;color:var(--t4)">${esc(s.type||'')}</span><button onclick="rmShot(${i})" style="background:none;border:none;color:var(--b3);cursor:pointer;font-size:12px">✕</button></div>
 <div class="shot-bd"><div class="sf"><label>Description</label><textarea data-shot="${i}.description" rows="3">${esc(s.description||'')}</textarea></div><div class="sf"><label>AI Image Prompt</label><textarea data-shot="${i}.prompt" rows="3">${esc(s.prompt||'')}</textarea></div></div></div>`).join('')}
 <div class="btn-row" style="margin-top:12px"><button class="btn btn-ghost btn-sm" onclick="goStep(4)">←</button><button class="btn btn-gold" onclick="goStage(${p.modules?.visuals?2:3})">→ ${p.modules?.visuals?'Visuals':'Production'}</button></div>`;
 }
@@ -4508,7 +4521,7 @@ ${grouped[t].map(ref=>`<div style="background:var(--bg2);border:1px solid ${ref.
 <div style="padding:5px 8px;background:var(--bg3);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--b1)">
 <span style="font-size:9px;font-weight:700;color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(ref.label||'')}</span>
 <div style="display:flex;gap:3px;align-items:center">
-${ref.uploaded?'<span style="font-size:7px;color:var(--blue);background:#050d18;padding:1px 4px;border-radius:3px">upload</span>':''}
+${ref.uploaded?'<span style="font-size:7px;color:var(--blue);background:#0a0a18;padding:1px 4px;border-radius:3px">upload</span>':''}
 <span style="font-size:7px;padding:1px 5px;border-radius:4px;background:${ref.status==='done'?'#041004':ref.status==='gen'?'#1a0f00':'var(--bg4)'};color:${ref.status==='done'?'var(--green)':ref.status==='gen'?'var(--gold)':'var(--t4)'}" id="rst-${ref._i}">${ref.status||'idle'}</span>
 </div>
 </div>
@@ -4645,7 +4658,7 @@ function sMultiAngle(p){
 ${!refs.length?`<div class="ib ib-red">No reference images yet. Go back to References and generate or upload at least one reference first.</div>`:''}
 <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
 <span style="font-size:10px;color:var(--t3);font-weight:700">Grid size:</span>
-${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};S.maSelectedAngles={};render()" style="background:${gridSize===n?'#1a1000':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
+${[3,6,9].map(n=>`<button onclick="S.maGrid=${n};S.maSelectedAngles={};render()" style="background:${gridSize===n?'#1a0f1e':'var(--bg3)'};border:1px solid ${gridSize===n?'var(--gold)':'var(--b2)'};color:${gridSize===n?'var(--gold)':'var(--t4)'};padding:4px 11px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700">${n} angles</button>`).join('')}
 <button class="btn btn-gold" onclick="genAllAngles()" id="btn-ma-all" style="margin-left:8px">✦ Generate Selected</button>
 <button class="btn btn-ghost btn-sm" onclick="S.stopSb=true">■ Stop</button>
 <div style="display:flex;gap:5px;margin-left:auto">
@@ -4813,7 +4826,7 @@ function sStoryboard(p){
 <button class="btn btn-ghost btn-sm" onclick="dlAllSbHiRes()" title="Download all frames as high-res">↓ All HiRes</button>
 </div>
 ${hasFb?`<div class="section-lbl">Client Feedback${p.storyboardFeedback?.length?' ('+p.storyboardFeedback.length+' shot notes)':''}</div>
-${(p.storyboardFeedback||[]).map(f=>`<div style="background:var(--bg2);border:1px solid #B8960C33;border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--gold)">S${f.num}:</strong> ${esc(f.feedback)}</div>`).join('')}
+${(p.storyboardFeedback||[]).map(f=>`<div style="background:var(--bg2);border:1px solid rgba(255,107,53,0.18);border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--gold)">S${f.num}:</strong> ${esc(f.feedback)}</div>`).join('')}
 ${p.overallStoryboardFeedback?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:5px;padding:8px 10px;margin-bottom:5px;font-size:10px"><strong style="color:var(--t3)">Overall: </strong>${esc(p.overallStoryboardFeedback)}</div>`:''}
 <button class="btn btn-gold btn-sm" style="margin-bottom:12px" onclick="clearSbFeedback()">Mark Feedback as Addressed</button>`:''}
 <div class="sb-grid">${shots.map(s=>sbCard(s,S.sbState[s.num])).join('')}${!shots.length?'<div style="color:var(--t4);font-size:10px;padding:10px;grid-column:1/-1">Generate shots in Writing → Step 5 first.</div>':''}</div>`;
@@ -4832,9 +4845,9 @@ function sbCard(s,sd){
   return`<div class="sbc2" id="sbc-${s.num}" style="${hasQaIssue?'border:2px solid var(--red);':''}">
 <div class="sbt">
 <span class="sbnum">S${s.num}</span>
-<span style="font-size:8px;color:#B8960C77;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scene||'')}</span>
+<span style="font-size:8px;color:rgba(255,107,53,0.45);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.scene||'')}</span>
 ${qaResult?`<span style="font-size:7px;color:${qaResult.pass?'var(--green)':'var(--red)'};background:${qaResult.pass?'#041004':'#180404'};padding:1px 5px;border-radius:3px;font-weight:700" title="${esc(qaResult.feedback||'')}">QA:${qaResult.score||'?'}/10</span>`:''}
-${variants.length?`<span style="font-size:7px;color:var(--blue);background:#050d18;padding:1px 4px;border-radius:3px">${variants.length}v</span>`:''}
+${variants.length?`<span style="font-size:7px;color:var(--blue);background:#0a0a18;padding:1px 4px;border-radius:3px">${variants.length}v</span>`:''}
 <span class="sbst ${bc}" id="sbb-${s.num}">${bt}</span>
 </div>
 <div class="sb-iw" id="sbi-${s.num}" style="${hasQaIssue?'position:relative;':''}">
@@ -4888,9 +4901,9 @@ async function singleSb(num){S.stopSb=false;const p=DB.getProject(S.pid);if(!p)r
 async function runSbShot(p,shot){
   if(S.stopSb)return;
   S.sbState[shot.num]={status:'gen',img:null,prompt:''};setSbSt(shot.num,'gen','gen...');
-  const maxTries=parseInt(document.getElementById('s-rt')?.value)||3;
+  const maxTries=parseInt(document.getElementById('s-rt')?.value,10)||3;
   const doQa=document.getElementById('tog-qa')?.classList.contains('on');
-  const thresh=parseInt(document.getElementById('s-th')?.value)||7;
+  const thresh=parseInt(document.getElementById('s-th')?.value,10)||7;
   const bestOf3=document.getElementById('tog-bo3')?.classList.contains('on');
   // Include user comment in prompt if available
   const userComment=(p.sbComments||{})[shot.num]||'';
@@ -5008,7 +5021,7 @@ function sVidPrompts(p){
   return`<div class="ptitle">Video Prompts</div><div class="psub">4-component packages per shot.</div>
 <div class="btn-row" style="margin-bottom:10px"><button class="btn btn-gold" onclick="genVidPrompts()">✦ Generate All</button><button class="btn btn-ghost btn-sm" onclick="goStep(2)">←</button><span id="vp-st" style="font-size:9px;color:var(--t4)">${vps.length?vps.length+' packages':''}</span></div>
 <div class="ai-load" id="vp-load"><div class="spinner"></div>Generating...</div>
-${vps.map((vp,i)=>`<div class="vpc"><div class="vph"><span class="sn2">S${vp.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:#B8960C77;font-weight:700;flex:1">${esc(vp.scene||'')}</span></div>
+${vps.map((vp,i)=>`<div class="vpc"><div class="vph"><span class="sn2">S${vp.num||String(i+1).padStart(2,'0')}</span><span style="font-size:9px;color:rgba(255,107,53,0.45);font-weight:700;flex:1">${esc(vp.scene||'')}</span></div>
 <div style="display:grid;grid-template-columns:180px 1fr">
 <div style="padding:8px;border-right:1px solid var(--b1)"><div class="vvid">${S.sbState[vp.num]?.img?`<img src="${S.sbState[vp.num].img}"/>`:'<div class="vvph">◇</div>'}</div></div>
 <div style="padding:8px;display:flex;flex-direction:column;gap:4px">
@@ -5150,7 +5163,7 @@ ${vs.url?`<video src="${vs.url}" controls style="width:100%;border-radius:5px"><
 <!-- Audio text -->
 <textarea id="al-${vp.num}" rows="4" style="font-size:9px;line-height:1.5;font-family:Arial,sans-serif;resize:vertical" placeholder="${vp.json?.audio&&vp.json.audio!=='none'?'Dialogue text…':'Describe the sound: footsteps on gravel, traffic noise, engine hum…'}">${esc(vp.json?.audio&&vp.json.audio!=='none'?vp.json.audio:vp.shot_description?.substring(0,60)||'')}</textarea>
 <!-- Suggest result -->
-<div id="asuggest-${vp.num}" style="display:none;font-size:9px;color:var(--gold);background:#0a0800;border:1px solid #B8960C33;border-radius:5px;padding:6px 8px;line-height:1.6"></div>
+<div id="asuggest-${vp.num}" style="display:none;font-size:9px;color:var(--gold);background:#0e0a18;border:1px solid rgba(255,107,53,0.18);border-radius:5px;padding:6px 8px;line-height:1.6"></div>
 <button class="btn btn-green" style="width:100%" onclick="genShotAudio('${vp.num}')">♪ Generate Audio</button>
 <audio id="ala-${vp.num}" controls style="width:100%;display:${as.url?'block':'none'};margin-top:2px" ${as.url?`src="${as.url}"`:''}></audio>
 ${hasAud?`<button onclick="downloadAudio('${vp.num}')" class="btn btn-ghost btn-sm" style="font-size:8px;width:100%">↓ Audio</button>`:''}
@@ -5507,7 +5520,7 @@ async function falImgI2I(imgUrl,prompt,strength){
 }
 async function falVid(imgUrl,prompt,dur,ratio){
   const k=kF();if(!S.vidModel)throw new Error('No model'); // k may be empty — server proxy has FAL_KEY
-  const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur),aspect_ratio:ratio})});
+  const r=await falFetch(`https://queue.fal.run/${S.vidModel.id}`,{method:'POST',headers:{'Authorization':`Key ${k}`,'Content-Type':'application/json'},body:JSON.stringify({image_url:imgUrl,prompt,duration:parseInt(dur,10),aspect_ratio:ratio})});
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${S.vidModel.id}/requests/${d.request_id}`;
