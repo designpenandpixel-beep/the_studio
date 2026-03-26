@@ -562,15 +562,29 @@ function mainHTML(){
 // LOGIN
 // ══════════════════════════════════════
 function loginHTML(){
-  return`<div class="login-wrap"><div class="login-box">
+  return`<div class="login-wrap">
+<div class="login-hero">
+  <div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div><div class="particle"></div>
+  <div class="login-hero-content">
+    <div class="login-hero-logo">The <span>Studio</span></div>
+    <div class="login-hero-tagline">AI-powered media production.<br>From brief to final cut.</div>
+    <div class="login-hero-features">
+      <div class="login-hero-feature"><div class="login-hero-feature-icon orange">◈</div>Produce</div>
+      <div class="login-hero-feature"><div class="login-hero-feature-icon violet">✦</div>AI-Powered</div>
+      <div class="login-hero-feature"><div class="login-hero-feature-icon cyan">▶</div>Deliver</div>
+    </div>
+  </div>
+</div>
+<div class="login-form-panel"><div class="login-box">
 <div class="login-logo">The <span>Studio</span></div>
-<div class="login-sub">Media production platform — sign in to continue</div>
+<div class="login-sub">Sign in to your production workspace</div>
 <div class="login-err" id="lerr"></div>
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <div class="fg"><label>Password</label><input type="password" id="lpw" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <button class="btn btn-gold" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">Sign In →</button>
 <div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Default admin: <strong style="color:var(--t3)">admin</strong> / <strong style="color:var(--t3)">admin123</strong></div>
-</div></div>`;
+</div></div>
+</div>`;
 }
 
 function doLogin(){
@@ -587,6 +601,21 @@ function doLogout(){DB.clearSession();S.session=null;S.view='login';S.tab='dashb
 // ══════════════════════════════════════
 function appBarHTML(){
   const r=S.session?.role;
+  const _i=(d,s=16)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const NAV_ICONS={
+    dashboard:_i('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',14),
+    projects:_i('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',14),
+    timeline:_i('<line x1="2" y1="12" x2="22" y2="12"/><polyline points="16 6 22 12 16 18"/>',14),
+    clients:_i('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',14),
+    creators:_i('<circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',14),
+    integrations:_i('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',14),
+    ld:_i('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',14),
+    leads:_i('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',14),
+    settings:_i('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',14),
+    inbox:_i('<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',14),
+    new:_i('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',14),
+    assets:_i('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',14),
+  };
   const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
   const clientNav=[{k:'dashboard',l:'My Projects'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
@@ -598,7 +627,7 @@ function appBarHTML(){
 <span class="rb-${r}">${roleLabel}</span>
 <span class="app-bar-name">${S.session?.name}</span>
 <nav class="app-bar-nav">
-${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
+${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${NAV_ICONS[t.k]||''} ${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
 ${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
 </nav>
 <div class="app-bar-right">
@@ -632,7 +661,7 @@ function saveKeys(){const u=getAdminUser();if(!u)return;u.apiKeys={claude:docume
 function hasNotifs(){const uid=S.session?.userId;if(!uid)return false;return DB.getNotifs(uid).some(n=>!n.read);}
 function getUnreadCount(){const uid=S.session?.userId;if(!uid)return 0;return DB.getNotifs(uid).filter(n=>!n.read).length;}
 function toggleNotifPanel(){const p=document.getElementById('notif-panel');const uid=S.session?.userId;if(!p||!uid)return;const isOpen=p.style.display!=='none';p.style.display=isOpen?'none':'block';if(!isOpen){renderNotifList(uid);}}
-function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#110d00'}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}')"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');}
+function renderNotifList(uid){const list=document.getElementById('notif-list');if(!list)return;const ns=DB.getNotifs(uid).slice(0,40);if(!ns.length){list.innerHTML='<div style="padding:20px;text-align:center;color:var(--t4);font-size:10px">No notifications</div>';return;}list.innerHTML=ns.map(n=>`<div style="padding:9px 13px;border-bottom:1px solid var(--b1);cursor:pointer;background:${n.read?'transparent':'#0d0a14'}" onclick="clickNotif('${n.id}','${n.projectId||''}','${n.type||''}')"><div style="display:flex;align-items:flex-start;gap:8px"><div style="width:7px;height:7px;border-radius:50%;background:${n.read?'var(--b3)':'var(--gold)'};flex-shrink:0;margin-top:3px"></div><div style="flex:1"><div style="font-size:10px;font-weight:700;color:${n.read?'var(--t3)':'var(--t1)'}">${esc(n.title)}</div><div style="font-size:9px;color:var(--t4);margin-top:2px;line-height:1.4">${esc(n.body)}</div><div style="font-size:8px;color:var(--t4);margin-top:3px">${n.ts?new Date(n.ts).toLocaleString():''}</div></div></div></div>`).join('');}
 function clickNotif(nid,pid,type){
   DB.markNotifRead(nid);
   if(pid){
@@ -685,17 +714,38 @@ function adminDashboard(){
   const complete=flt.filter(p=>p.workflowStatus==='complete').length;
   const inProd=flt.filter(p=>['storyboard_in_progress','storyboard_review'].includes(p.workflowStatus)).length;
   const inSyn=flt.filter(p=>['brief_submitted','synopsis_review','synopsis_locked'].includes(p.workflowStatus)).length;
+  const hour=new Date().getHours();
+  const greeting=hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   return`<div class="page">
-<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-<div><div class="page-title">Admin Dashboard</div><div class="page-sub">The Studio — complete overview</div></div>
-<div class="btn-row" style="margin-top:0">
-<button class="btn btn-gold" onclick="showRegModal('client')">+ Register Client</button>
-<button class="btn btn-outline" onclick="showRegModal('creator')">+ Add Creator</button>
-<button class="btn btn-ghost" onclick="showNewProjModal()">+ New Project</button>
-<button class="btn btn-blue" onclick="syncToSheets()">↑ Sync to Sheets</button>
-</div></div>
-<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:16px">
-${[{n:ps.length,l:'Total Projects',c:'var(--gold)',f:{},tab:'projects'},{n:clients.length,l:'Clients',c:'var(--purple)',f:{},tab:'clients'},{n:creators.length,l:'Creators',c:'var(--blue)',f:{},tab:'creators'},{n:needs.length,l:'Need Attention',c:'var(--red)',f:{},tab:'projects'},{n:complete,l:'Complete',c:'var(--green)',f:{status:'complete'},tab:'projects'},{n:inProd,l:'In Production',c:'#2ac09a',f:{status:'storyboard_in_progress'},tab:'projects'},{n:inSyn,l:'In Review',c:'#e06040',f:{status:'synopsis_review'},tab:'projects'}].map(s=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px 8px;text-align:center;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor='${s.c}33'" onmouseout="this.style.borderColor='var(--b1)'" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')"><div style="font-size:20px;font-weight:700;color:${s.c}">${s.n}</div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-top:2px;line-height:1.3">${s.l}</div></div>`).join('')}
+<div class="dash-hero">
+  <div class="dash-hero-bg"></div>
+  <div class="dash-hero-content">
+    <div class="dash-hero-text">
+      <div class="dash-hero-greeting">${greeting}, ${esc(S.session?.name||'Admin')}</div>
+      <div class="dash-hero-sub">${needs.length?`<span style="color:var(--gold)">${needs.length}</span> project${needs.length!==1?'s':''} need${needs.length===1?'s':''} your attention`:'All projects on track — looking great'}</div>
+    </div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn btn-gold" onclick="showRegModal('client')">+ Client</button>
+      <button class="btn btn-ai" onclick="showNewProjModal()">✦ New Project</button>
+      <button class="btn btn-ghost" onclick="showRegModal('creator')">+ Creator</button>
+      <button class="btn btn-ghost" onclick="syncToSheets()">↑ Sync</button>
+    </div>
+  </div>
+</div>
+<div class="dash-tiles">
+${[
+  {n:ps.length,l:'Total Projects',icon:'◈',grad:'var(--grad-hero)',f:{},tab:'projects'},
+  {n:clients.length,l:'Clients',icon:'◉',grad:'var(--grad-ai)',f:{},tab:'clients'},
+  {n:creators.length,l:'Creators',icon:'✦',grad:'linear-gradient(135deg,#3B82F6,#06B6D4)',f:{},tab:'creators'},
+  {n:needs.length,l:'Need Attention',icon:'⚡',grad:'linear-gradient(135deg,#EF4444,#FF6B35)',f:{},tab:'projects'},
+  {n:complete,l:'Complete',icon:'✓',grad:'linear-gradient(135deg,#10B981,#06B6D4)',f:{status:'complete'},tab:'projects'},
+  {n:inProd,l:'In Production',icon:'▶',grad:'linear-gradient(135deg,#06B6D4,#8B5CF6)',f:{status:'storyboard_in_progress'},tab:'projects'},
+  {n:inSyn,l:'In Review',icon:'◎',grad:'linear-gradient(135deg,#F59E0B,#FF6B35)',f:{status:'synopsis_review'},tab:'projects'}
+].map(s=>`<div class="dash-tile" onclick="S.projF={...S.projF||{},...${JSON.stringify(s.f||{})}};S.dashF={...S.dashF||{},...${JSON.stringify(s.f||{})}};goTab('${s.tab}')">
+  <div class="dash-tile-icon" style="background:${s.grad}">${s.icon}</div>
+  <div class="dash-tile-num" style="background:${s.grad};-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">${s.n}</div>
+  <div class="dash-tile-label">${s.l}</div>
+</div>`).join('')}
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -1221,7 +1271,7 @@ function adminClients(){
   return`<tr>
 <td><div class="urow"><div class="uav uav-client">${(c.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
 <td><code style="color:var(--purple);font-size:10px">${c.clientId||'—'}</code></td>
-<td><code style="color:var(--t4);font-size:10px">${c.password}</code></td>
+<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="this.previousElementSibling.textContent=this.previousElementSibling.textContent==='••••••••'?this.previousElementSibling.dataset.pw:'••••••••';this.textContent=this.textContent==='👁'?'👁‍🗨':'👁'" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${pcount}</span></td>
 <td><span style="font-size:10px;color:${emp?'var(--blue)':'var(--t4)'}">${emp?esc(emp.name):'Unassigned'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
@@ -1247,7 +1297,7 @@ function adminCreators(){
   return`<tr>
 <td><div class="urow"><div class="uav uav-creator">${(e.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.email||'')}</div></div></div></td>
 <td><code style="color:var(--blue);font-size:10px">${esc(e.username||e.name)}</code></td>
-<td><code style="color:var(--t4);font-size:10px">${e.password}</code></td>
+<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(e.password)}">••••••••</code><button onclick="this.previousElementSibling.textContent=this.previousElementSibling.textContent==='••••••••'?this.previousElementSibling.dataset.pw:'••••••••';this.textContent=this.textContent==='👁'?'👁‍🗨':'👁'" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${assigned}</span></td>
 <td><span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span></td>
 <td><div style="display:flex;gap:4px">
@@ -2492,7 +2542,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="card"><div class="card-head"><span class="card-title">👤 ADMIN ACCOUNT</span></div><div class="card-body">
 <div class="form2">
 <div class="fg"><label>Admin Name</label><input type="text" id="admin-name" value="${esc(u.name||'Admin')}"/></div>
-<div class="fg"><label>Admin Password</label><input type="text" id="admin-pw" value="${esc(u.password||'')}"/></div>
+<div class="fg"><label>Admin Password</label><input type="password" id="admin-pw" value="${esc(u.password||'')}"/></div>
 </div>
 <button class="btn btn-gold" onclick="saveAdminAccount()">Save Account</button>
 </div></div>
@@ -2807,12 +2857,12 @@ function doPost(e) {
 
 function exportUsersCSV(role){
   const us=DB.getUsers().filter(u=>u.role===role);
-  const rows=role==='client'?[['Client ID','Name','Email','Password','Projects','Status']]:
-    [['Username','Name','Email','Password','Assigned Clients','Status']];
+  const rows=role==='client'?[['Client ID','Name','Email','Projects','Status']]:
+    [['Username','Name','Email','Assigned Clients','Status']];
   us.forEach(u=>{
     const px=DB.getProjects().filter(p=>p.clientId===u.id).length;
-    if(role==='client')rows.push([u.clientId||'',u.name,u.email||'',u.password,px,u.active!==false?'Active':'Inactive']);
-    else rows.push([u.username||u.name,u.name,u.email||'',u.password,(u.assignedClients||[]).length,u.active!==false?'Active':'Inactive']);
+    if(role==='client')rows.push([u.clientId||'',u.name,u.email||'',px,u.active!==false?'Active':'Inactive']);
+    else rows.push([u.username||u.name,u.name,u.email||'',(u.assignedClients||[]).length,u.active!==false?'Active':'Inactive']);
   });
   dlTxt(rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n'),role+'s_export_'+new Date().toISOString().slice(0,10)+'.csv');
 }
@@ -3467,7 +3517,7 @@ function showEditUserModal(uid){
   openModal(`<div class="modal-title">Edit ${u.role} — ${esc(u.name)}</div>
 <div class="fg"><label>Full Name</label><input type="text" id="eu-n" value="${esc(u.name)}"/></div>
 <div class="fg"><label>Email</label><input type="text" id="eu-e" value="${esc(u.email||'')}"/></div>
-<div class="fg"><label>Password</label><input type="text" id="eu-p" value="${esc(u.password||'')}"/></div>
+<div class="fg"><label>Password</label><input type="password" id="eu-p" value="${esc(u.password||'')}"/></div>
 ${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <strong style="color:var(--purple)">${u.clientId}</strong></div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
