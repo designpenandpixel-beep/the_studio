@@ -1441,27 +1441,55 @@ function adminClients(){
 
 function adminCreators(){
   const emps=DB.getUsers().filter(u=>u.role==='creator');
+  const ps=DB.getProjects();
+  const typeColors={commercial_ad:'#FF6B35',short_film:'#8B5CF6',youtube_explainer:'#EF4444',podcast:'#3B82F6',product_video:'#06B6D4',testimonial:'#10B981',influencer_ugc:'#EC4899',music_video:'#F59E0B',design:'#06B6D4'};
+  const maxProjects=5; // capacity bar max
   return`<div class="page">
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
 <div><div class="page-title">Creators</div><div class="page-sub">${emps.length} registered</div></div>
 <button class="btn btn-gold" onclick="showRegModal('creator')">+ Add Creator</button>
 </div>
-<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Creator</th><th>Username</th><th>Password</th><th>Assigned Clients</th><th>Status</th><th>Actions</th></tr></thead>
-<tbody>${emps.length?emps.map(e=>{
-  const assigned=(e.assignedClients||[]).map(cid=>DB.getUser(cid)?.name||cid).join(', ')||'None';
-  return`<tr>
-<td><div class="urow"><div class="uav uav-creator">${(e.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(e.name)}</div><div class="sub">${esc(e.email||'')}</div></div></div></td>
-<td><code style="color:var(--blue);font-size:10px">${esc(e.username||e.name)}</code></td>
-<td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(e.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
-<td><span style="font-size:10px;color:var(--t3)">${assigned}</span></td>
-<td><span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span></td>
-<td><div style="display:flex;gap:4px">
-<button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
-<button class="btn btn-blue btn-sm" onclick="showAssignClientsModal('${e.id}')">Assign Clients</button>
-<button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Deactivate':'Activate'}</button>
-</div></td></tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--t4);padding:20px">No creators yet</td></tr>'}</tbody></table>
-</div></div>`;
+${emps.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+${emps.map(e=>{
+  const activeProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus!=='complete');
+  const completedProjects=ps.filter(p=>p.assignedCreatorId===e.id&&p.workflowStatus==='complete');
+  const assignedClients=(e.assignedClients||[]).map(cid=>DB.getUser(cid)).filter(Boolean);
+  const workload=activeProjects.length;
+  const pct=Math.min(100,Math.round((workload/maxProjects)*100));
+  const wColor=pct>=80?'var(--red)':pct>=50?'var(--gold)':'var(--green)';
+  // Detect specialities from project types
+  const specialities=[...new Set(ps.filter(p=>p.assignedCreatorId===e.id).map(p=>p.type).filter(Boolean))];
+  return`<div style="background:var(--glass-bg);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-radius:var(--r2);overflow:hidden;transition:border-color .2s,transform .2s" onmouseover="this.style.borderColor='rgba(255,255,255,0.15)';this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--glass-border)';this.style.transform=''">
+<div style="padding:16px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--b1)">
+  <div class="uav uav-creator" style="width:40px;height:40px;font-size:14px">${(e.name[0]||'?').toUpperCase()}</div>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:14px;font-weight:700;color:var(--t1)">${esc(e.name)}</div>
+    <div style="font-size:10px;color:var(--t4)">${esc(e.username||e.name)} · ${esc(e.email||'')}</div>
+  </div>
+  <span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span>
+</div>
+<div style="padding:14px 18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-size:9px;color:var(--t4);text-transform:uppercase;font-weight:700;letter-spacing:.06em">Workload</span>
+    <span style="font-size:10px;color:${wColor};font-weight:700">${workload}/${maxProjects} active</span>
+  </div>
+  <div style="height:4px;background:var(--bg);border-radius:2px;overflow:hidden;margin-bottom:12px">
+    <div style="height:100%;width:${pct}%;background:${wColor};border-radius:2px;transition:width .3s"></div>
+  </div>
+  ${specialities.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">${specialities.slice(0,4).map(t=>`<span style="font-size:8px;padding:2px 7px;border-radius:8px;background:${(typeColors[t]||'var(--t4)')}18;color:${typeColors[t]||'var(--t4)'};border:1px solid ${(typeColors[t]||'var(--t4)')}33;font-weight:600">${MT[t]?.label||t}</span>`).join('')}</div>`:''}
+  <div style="display:flex;gap:8px;font-size:10px;color:var(--t3);margin-bottom:12px">
+    <span>${assignedClients.length} client${assignedClients.length!==1?'s':''}</span>
+    <span>·</span>
+    <span>${completedProjects.length} completed</span>
+  </div>
+  <div style="display:flex;gap:4px">
+    <button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
+    <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
+    <button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Off':'On'}</button>
+  </div>
+</div></div>`;}).join('')}
+</div>`:`<div style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No creators yet</div><div style="font-size:10px;color:var(--t4)">Add your first creator to start assigning projects</div></div>`}
+</div>`;
 }
 
 const INTEGRATION_PRESETS=[
@@ -1894,14 +1922,17 @@ function adminTimeline(){
     const history=p.stageHistory||[{stage:p.workflowStatus||'new',enteredAt:created}];
     const isOverdue=p.deadline&&new Date(p.deadline)<now;
     const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
-    const rowBg=i%2===0?'transparent':'#ffffff04';
+    const rowBg=isOverdue?'rgba(239,68,68,0.04)':i%2===0?'#0A0A12':'#12121E';
     const cl=DB.getUser(p.clientId);
     const cr=DB.getUser(p.assignedCreatorId);
 
     rows+=`<rect x="0" y="${y}" width="${LABEL_W+CHART_W}" height="${ROW_H}" fill="${rowBg}"/>`;
+    // Overdue left border indicator
+    if(isOverdue)rows+=`<rect x="0" y="${y}" width="3" height="${ROW_H}" fill="#EF4444" opacity="0.8"/>`;
+    else if(isAtRisk)rows+=`<rect x="0" y="${y}" width="3" height="${ROW_H}" fill="#FF6B35" opacity="0.5"/>`;
 
     // Label area
-    rows+=`<text x="8" y="${y+14}" fill="${isOverdue?'#e07a7a':'#e0e0e0'}" font-size="10" font-weight="700" font-family="Arial,sans-serif" style="cursor:pointer" onclick="openStudio('${p.id}')">${esc(p.name.substring(0,26)+(p.name.length>26?'…':''))}</text>`;
+    rows+=`<text x="8" y="${y+14}" fill="${isOverdue?'#F87171':'#F0F0FF'}" font-size="10" font-weight="700" font-family="Arial,sans-serif" style="cursor:pointer" onclick="openStudio('${p.id}')">${esc(p.name.substring(0,26)+(p.name.length>26?'…':''))}</text>`;
     rows+=`<text x="8" y="${y+26}" fill="${isOverdue?'#c04a4a':'#666'}" font-size="8" font-family="Arial,sans-serif">${p.projectId||'—'} · ${cl?esc(cl.name.substring(0,14)):'No client'}</text>`;
     rows+=`<text x="8" y="${y+36}" fill="${stageColor(p.workflowStatus||'new')}" font-size="8" font-family="Arial,sans-serif" font-weight="700">${stageLabel(p.workflowStatus||'new').toUpperCase()}</text>`;
 
@@ -1926,7 +1957,8 @@ function adminTimeline(){
       const x2=clampX(dateToX(endTime));
       if(x2<=x1+1)continue;
       const barY=y+8;const barH=ROW_H-18;
-      rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="3" fill="${stageColor(stage)}" opacity="${p.workflowStatus===stage?'0.9':'0.5'}" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
+      rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="${barH/2}" fill="${stageColor(stage)}" opacity="${p.workflowStatus===stage?'0.9':'0.45'}" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
+      if(p.workflowStatus===stage)rows+=`<rect x="${x1}" y="${barY}" width="${x2-x1}" height="${barH}" rx="${barH/2}" fill="${stageColor(stage)}" opacity="0.15" filter="blur(4px)" style="pointer-events:none"/>`;  // active glow
       if(x2-x1>30){rows+=`<text x="${(x1+x2)/2}" y="${barY+barH/2+4}" text-anchor="middle" fill="#fff" font-size="7" font-family="Arial,sans-serif" opacity="0.9" style="pointer-events:none">${WF_STAGES.find(s=>s.id===stage)?.short||''}</text>`;}
       drewBar=true;
     }
@@ -1944,7 +1976,7 @@ function adminTimeline(){
       const dx=dateToX(p.deadline);
       if(dx>LABEL_W+PAD&&dx<LABEL_W+CHART_W-PAD){
         const dy=y+ROW_H/2;const ds=7;
-        const col=isOverdue?'#c04a4a':isAtRisk?'#e0a020':'#4ac04a';
+        const col=isOverdue?'#EF4444':isAtRisk?'#F59E0B':'#10B981';
         rows+=`<polygon points="${dx},${dy-ds} ${dx+ds},${dy} ${dx},${dy+ds} ${dx-ds},${dy}" fill="${col}" opacity="0.9" onclick="openStudio('${p.id}')" style="cursor:pointer"/>`;
       }
     }
@@ -1999,8 +2031,10 @@ ${weekTicks.filter(t=>t.label).map(t=>`<text x="${t.x+3}" y="32" fill="#333" fon
 <!-- Rows -->
 ${rows}
 <!-- Today line (on top) -->
-<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#c04a4a" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.8"/>
-<text x="${todayX+3}" y="48" fill="#c04a4a" font-size="8" font-family="Arial,sans-serif" font-weight="700">TODAY</text>
+<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#06B6D4" stroke-width="2.5" opacity="0.9"/>
+<line x1="${todayX}" y1="40" x2="${todayX}" y2="${totalH}" stroke="#06B6D4" stroke-width="8" opacity="0.12"/>
+<rect x="${todayX-14}" y="38" width="28" height="13" rx="3" fill="#06B6D4" opacity="0.9"/>
+<text x="${todayX}" y="48" text-anchor="middle" fill="#000" font-size="7" font-family="Arial,sans-serif" font-weight="800">TODAY</text>
 <!-- Bottom border -->
 <line x1="0" y1="${totalH-1}" x2="${LABEL_W+CHART_W}" y2="${totalH-1}" stroke="#1e1e1e" stroke-width="1"/>
 </svg>
@@ -2652,7 +2686,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="form2">
 <div class="fg"><label>Supabase Project URL</label><input type="text" id="sb-url-inp" value="${esc(sbUrl)}" placeholder="https://xxxx.supabase.co"/></div>
 <div class="fg"><label>Supabase Anon Key <span style="font-size:8px;color:var(--t4);font-weight:400">(Settings → API → anon public — starts with eyJ, ~200 chars)</span></label>
-<input type="text" id="sb-key-inp" value="${esc(sbKey)}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." oninput="sbKeyHint(this)"/>
+<div style="display:flex;gap:4px;align-items:center"><input type="password" id="sb-key-inp" value="${esc(sbKey)}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." oninput="sbKeyHint(this)" style="flex:1"/><button onclick="const i=document.getElementById('sb-key-inp');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'👁‍🗨'" style="background:none;border:1px solid var(--b2);border-radius:var(--r);cursor:pointer;font-size:13px;padding:6px 8px;color:var(--t3)">👁</button></div>
 <div id="sb-key-hint" style="font-size:9px;margin-top:3px;color:${sbKey.startsWith('eyJ')&&sbKey.length>100?'var(--green)':'var(--t4)'}">${sbKey?sbKey.startsWith('eyJ')&&sbKey.length>100?'✓ Key format looks correct ('+sbKey.length+' chars)':'⚠ Should start with eyJ and be ~200+ chars (currently '+sbKey.length+')':'Paste from Supabase Dashboard → Settings → API → Project API keys → anon public'}</div>
 </div>
 </div>
@@ -2678,10 +2712,11 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">🔑 API KEYS</span></div><div class="card-body">
 <div class="ib ib-red" style="margin-bottom:10px"><strong>Admin-only.</strong> These keys power all AI generation for every user.</div>
 <div class="form3">
-<div class="fg"><label>Anthropic (Claude)</label><input type="text" id="k-c" value="${kC()}" placeholder="sk-ant-..." oninput="saveKeys()"/></div>
-<div class="fg"><label>fal.ai</label><input type="text" id="k-f" value="${kF()}" placeholder="fal-key-..." oninput="saveKeys()"/></div>
-<div class="fg"><label>ElevenLabs</label><input type="text" id="k-e" value="${kE()}" placeholder="el-api-key..." oninput="saveKeys()"/></div>
+<div class="fg"><label>Anthropic (Claude)</label><input type="password" id="k-c" value="${kC()}" placeholder="sk-ant-..." oninput="saveKeys()"/></div>
+<div class="fg"><label>fal.ai</label><input type="password" id="k-f" value="${kF()}" placeholder="fal-key-..." oninput="saveKeys()"/></div>
+<div class="fg"><label>ElevenLabs</label><input type="password" id="k-e" value="${kE()}" placeholder="el-api-key..." oninput="saveKeys()"/></div>
 </div>
+<div style="margin-bottom:8px"><button onclick="['k-c','k-f','k-e'].forEach(id=>{const i=document.getElementById(id);if(i)i.type=i.type==='password'?'text':'password'});this.textContent=document.getElementById('k-c')?.type==='password'?'👁 Show keys':'👁‍🗨 Hide keys'" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--t4)">👁 Show keys</button></div>
 <button class="btn btn-green" onclick="saveKeys();toast('Keys saved!','ok')">✓ Save API Keys</button>
 </div></div>
 
@@ -2858,8 +2893,8 @@ function adminLeads(){
   function statusBadge(s){const map={pending:'var(--gold)',contacted:'var(--blue)',converted:'var(--green)',closed:'var(--t4)'};return`<span style="font-size:8px;background:${(map[s]||'var(--t4)')}22;color:${map[s]||'var(--t4)'};border:1px solid ${(map[s]||'var(--t4)')}44;padding:2px 7px;border-radius:8px;text-transform:uppercase;font-weight:700">${s||'pending'}</span>`;}
   function fmtDate(d){if(!d)return'—';const dt=new Date(d);return isNaN(dt)?d:dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}
   function demoRows(){
-    if(!demos)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
-    if(!demos.length)return`<tr><td colspan="8" style="text-align:center;color:var(--t4);padding:20px">No demo requests yet</td></tr>`;
+    if(!demos)return`<tr><td colspan="8" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">◈</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No demo data loaded yet</div><div style="font-size:10px;color:var(--t4);margin-bottom:14px">Click <strong style="color:var(--gold)">Refresh</strong> to pull the latest leads from your website</div><button class="btn btn-outline btn-sm" onclick="leadsRefresh()">↓ Load Demos</button></td></tr>`;
+    if(!demos.length)return`<tr><td colspan="8" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No demo requests yet</div><div style="font-size:10px;color:var(--t4)">Your next client is on their way — demos will appear here automatically</div></td></tr>`;
     return demos.map((d,i)=>`<tr>
 <td style="font-size:10px;color:#fff;font-weight:600">${esc(d.name||'—')}</td>
 <td style="font-size:9px;color:var(--t3)">${esc(d.email||'—')}</td>
@@ -2876,8 +2911,8 @@ function adminLeads(){
 </tr>`).join('');
   }
   function enqRows(){
-    if(!enqs)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No data — click Refresh to load</td></tr>`;
-    if(!enqs.length)return`<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No enquiries yet</td></tr>`;
+    if(!enqs)return`<tr><td colspan="7" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">◈</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No enquiry data loaded yet</div><div style="font-size:10px;color:var(--t4);margin-bottom:14px">Click <strong style="color:var(--gold)">Refresh</strong> to pull the latest enquiries</div><button class="btn btn-outline btn-sm" onclick="leadsRefresh()">↓ Load Enquiries</button></td></tr>`;
+    if(!enqs.length)return`<tr><td colspan="7" style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No enquiries yet</div><div style="font-size:10px;color:var(--t4)">Enquiries from your website will appear here when they come in</div></td></tr>`;
     return enqs.map((e,i)=>`<tr>
 <td style="font-size:10px;color:#fff;font-weight:600">${esc(e.name||'—')}</td>
 <td style="font-size:9px;color:var(--t3)">${esc(e.email||'—')}</td>
@@ -3712,21 +3747,37 @@ function showNewProjModal(prefill){
   const clients=DB.getUsers().filter(u=>u.role==='client');
   const emps=DB.getUsers().filter(u=>u.role==='creator');
   const pf=prefill||{};
-  openModal(`<div class="modal-title">New Project</div>
+  const mtColors={commercial_ad:'#FF6B35',short_film:'#8B5CF6',youtube_explainer:'#EF4444',podcast:'#3B82F6',product_video:'#06B6D4',testimonial:'#10B981',influencer_ugc:'#EC4899',music_video:'#F59E0B',design:'#06B6D4'};
+  openModal(`<div class="modal-title">Launch New Project</div>
+
+<div class="fg"><label>Project Name</label><input type="text" id="np-n" value="${esc(pf.name||'')}" placeholder="e.g. Q4 Social Campaign — Brand Awareness"/></div>
+
+<div class="section-lbl" style="margin-top:12px">Media Type</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">
+${Object.entries(MT).map(([k,m])=>`<div onclick="document.querySelectorAll('.mt-card').forEach(c=>c.style.borderColor='var(--b2)');this.style.borderColor='${mtColors[k]||'var(--gold)'}';document.getElementById('np-t').value='${k}'" class="mt-card" style="background:var(--bg3);border:2px solid ${(pf.type||'commercial_ad')===k?(mtColors[k]||'var(--gold)'):'var(--b2)'};border-radius:var(--r);padding:10px;cursor:pointer;text-align:center;transition:border-color .15s">
+<div style="font-size:18px;margin-bottom:4px">${m.icon}</div>
+<div style="font-size:9px;font-weight:700;color:var(--t2)">${m.label}</div>
+</div>`).join('')}
+</div>
+<select id="np-t" style="display:none">${Object.entries(MT).map(([k,m])=>`<option value="${k}"${(pf.type||'commercial_ad')===k?' selected':''}>${m.label}</option>`).join('')}</select>
+
+<div class="section-lbl">Priority</div>
+<div style="display:flex;gap:6px;margin-bottom:16px">
+${[{v:'low',l:'Low',c:'var(--t4)',bg:'var(--bg3)'},{v:'medium',l:'Medium',c:'#F59E0B',bg:'rgba(245,158,11,0.08)'},{v:'high',l:'High',c:'var(--red)',bg:'rgba(239,68,68,0.08)'}].map(p=>`<button type="button" onclick="document.querySelectorAll('.pri-btn').forEach(b=>{b.style.borderColor='var(--b2)';b.style.background='var(--bg3)'});this.style.borderColor='${p.c}';this.style.background='${p.bg}';document.getElementById('np-pri').value='${p.v}'" class="pri-btn" style="flex:1;padding:8px;border-radius:var(--r);border:2px solid ${(pf.priority||'medium')===p.v?p.c:'var(--b2)'};background:${(pf.priority||'medium')===p.v?p.bg:'var(--bg3)'};color:${p.c};cursor:pointer;font-size:10px;font-weight:700;font-family:inherit;text-align:center">${p.l}</button>`).join('')}
+</div>
+<select id="np-pri" style="display:none"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+
+<div class="section-lbl">Assignment & Timeline</div>
 <div class="form2">
-<div class="fg full"><label>Project Name</label><input type="text" id="np-n" value="${esc(pf.name||'')}" placeholder="e.g. Q4 Social Campaign — Brand Awareness"/></div>
-<div class="fg"><label>Media Type</label><select id="np-t">${Object.entries(MT).map(([k,m])=>`<option value="${k}"${pf.type===k?' selected':''}>${m.icon} ${m.label}</option>`).join('')}</select></div>
-<div class="fg"><label>Priority</label><select id="np-pri">
-<option value="medium">● Medium</option><option value="high">🔴 High</option><option value="low">○ Low</option>
-</select></div>
 <div class="fg"><label>Link Client</label><select id="np-c"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${pf.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
 <div class="fg"><label>Assign Creator</label><select id="np-e"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Deadline</label><input type="date" id="np-dl" value="${pf.deadline||''}"/></div>
-<div class="fg"><label>Tags (comma separated)</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
-<div class="fg full"><label>Brief / Notes</label><textarea id="np-notes" rows="2" placeholder="Any initial notes or brief details...">${esc(pf.notes||'')}</textarea></div>
+<div class="fg"><label>Tags</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
 </div>
+<div class="fg"><label>Brief / Notes</label><textarea id="np-notes" rows="2" placeholder="Any initial notes or brief details...">${esc(pf.notes||'')}</textarea></div>
+
 <input type="hidden" id="np-wfinit" value="${esc(pf.workflowStatus||'')}"/>
-<div class="btn-row"><button class="btn btn-gold" onclick="doNewProject()">Create Project →</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+<div class="btn-row"><button class="btn btn-gold" onclick="doNewProject()" style="flex:1;justify-content:center">✦ Launch Project</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doNewProject(){
   const name=document.getElementById('np-n')?.value.trim();if(!name){toast('Name required','err');return}
