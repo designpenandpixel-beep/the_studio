@@ -813,7 +813,7 @@ function appBarHTML(){
   };
   const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'pms',l:'AI PMs'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
-  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
+  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Folder'}];
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
   const roleLabel=r==='admin'?'Admin':r==='creator'?'AI PM':'Client';
   return`<div class="app-bar">
@@ -4468,24 +4468,121 @@ async function submitBrief(){
 // ══════════════════════════════════════
 function clientAssets(){
   const u=DB.getUser(S.session.userId);const assets=u?.brandAssets||[];
-  return`<div class="page">
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-<div><div class="page-title">Brand Assets</div><div class="page-sub">Logos, brand guidelines, reference images — auto-linked to all your projects</div></div>
-<button class="btn btn-gold" onclick="document.getElementById('au').click()">+ Upload Assets</button>
+  const bf=u?.brandFolder||{};
+  const byType=(t)=>assets.filter(a=>a.assetType===t);
+
+  const secHTML=(label,icon,type,hint)=>{
+    const items=byType(type);
+    return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:14px;margin-bottom:12px;">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+  <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px">${icon}</span><div><div style="font-size:12px;font-weight:700;color:var(--t1)">${label}</div><div style="font-size:10px;color:var(--t4)">${hint}</div></div></div>
+  <button class="btn btn-ghost btn-sm" onclick="triggerBFUpload('${type}')">+ Upload</button>
 </div>
-<input type="file" id="au" multiple accept="image/*,.pdf" style="display:none" onchange="uploadClientAssets(event)"/>
-<div class="ib ib-blue"><strong>How it works:</strong> All assets you upload here are automatically available to our team when working on your projects. Upload brand guides, logos, reference images, or mood boards.</div>
-<div class="ag">
-${assets.map((a,i)=>`<div class="ac2">
-<div class="at">${a.preview?`<img src="${a.preview}" onclick="openImgModal('${esc(a.name)}','${a.preview}')"/>`:'<div class="at-ph">📄</div>'}</div>
-<div class="ai2"><div class="an">${esc(a.name)}</div><div class="atp">${a.assetType||'Asset'}</div></div>
-<div style="padding:4px 8px 6px;display:flex;justify-content:space-between">
-<span style="font-size:8px;color:var(--t4)">${a.uploadedAt?new Date(a.uploadedAt).toLocaleDateString():''}</span>
-<button onclick="deleteClientAsset(${i})" style="background:none;border:none;color:var(--t4);cursor:pointer;font-size:11px">✕</button>
-</div></div>`).join('')}
-${!assets.length?'<div style="grid-column:1/-1;color:var(--t4);font-size:11px;padding:24px;text-align:center">No assets uploaded yet.</div>':''}
-</div></div>`;
+${items.length?`<div style="display:flex;flex-wrap:wrap;gap:8px;">${items.map((a,i)=>`<div style="position:relative;background:var(--bg3);border:1px solid var(--b1);border-radius:8px;padding:8px;min-width:80px;max-width:120px;text-align:center;">
+${a.preview&&a.type?.startsWith('image/')?`<img src="${a.preview}" style="width:100%;height:60px;object-fit:contain;border-radius:4px;margin-bottom:4px;" onclick="openImgModal('${esc(a.name)}','${a.preview}')"/>`:`<div style="width:100%;height:60px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:4px;">📄</div>`}
+<div style="font-size:9px;color:var(--t2);word-break:break-all;line-height:1.3">${esc(a.name)}</div>
+<button onclick="deleteBFAsset('${a.id}')" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.5);border:none;color:var(--t3);cursor:pointer;font-size:10px;border-radius:3px;padding:0 3px;">✕</button>
+</div>`).join('')}</div>`:
+`<div style="color:var(--t4);font-size:11px;text-align:center;padding:16px;border:1px dashed var(--b2);border-radius:6px;">No ${label.toLowerCase()} uploaded yet</div>`}
+</div>`;
+  };
+
+  return`<div class="page">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+<div><div class="page-title">Brand Folder</div><div class="page-sub">Your brand knowledge base — used by your AI PM for every project</div></div>
+</div>
+<div class="ib ib-blue" style="margin-bottom:16px"><strong>How it works:</strong> Everything you upload here is read by your dedicated AI PM before starting any project. The more you share, the more accurate and on-brand your output will be.</div>
+
+<input type="file" id="bf-upload" multiple accept="image/*,.pdf,.doc,.docx,.pptx" style="display:none" onchange="uploadBFAsset(event,window._bfUploadType)"/>
+
+<!-- BRAND IDENTITY -->
+${secHTML('Logo & Visual Identity','🎨','Logo','Upload logo files — PNG, SVG, or AI formats')}
+${secHTML('Brand Guidelines','📘','Brand Guide','PDF or document with your brand rules, fonts, colours')}
+${secHTML('Tone of Voice','✍️','Tone of Voice','Documents describing how your brand speaks and writes')}
+
+<!-- MARKET INTELLIGENCE -->
+${secHTML('Competitor References','🔍','Competitor','Screenshots or links to competitor content for context')}
+${secHTML('Market Positioning','📊','Positioning','Documents or slides describing your market position')}
+
+<!-- CREATIVE REFERENCES -->
+${secHTML('Mood Board & References','🎬','Mood Board','Visual references, stills, or content you love')}
+${secHTML('Previous Campaigns','📁','Campaign','Past work — ads, videos, posts — so the PM understands your history')}
+
+<!-- BRAND NOTES -->
+<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:14px;margin-bottom:12px;">
+  <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:8px;">📝 Brand Notes <span style="font-size:10px;font-weight:400;color:var(--t4);margin-left:6px;">Free-text context for your AI PM</span></div>
+  <textarea id="bf-notes" rows="4" placeholder="e.g. We are a premium EV brand targeting urban professionals aged 28-45. Our tone is confident but approachable. We avoid humour. Our competitors are Tesla and BMW. Key differentiator: Made in India story..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);border-radius:6px;padding:10px;font-size:11px;color:var(--t1);font-family:inherit;resize:vertical;">${esc(bf.notes||'')}</textarea>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+    <button class="btn btn-gold btn-sm" onclick="saveBFNotes()">Save Notes</button>
+    <span id="bf-notes-saved" style="font-size:10px;color:var(--green);display:none;">✓ Saved</span>
+  </div>
+</div>
+
+<!-- PM SUMMARY -->
+${u?.assignedPmId?`<div style="background:linear-gradient(135deg,rgba(99,102,241,0.1),rgba(6,182,212,0.05));border:1px solid rgba(99,102,241,0.2);border-radius:10px;padding:14px;">
+<div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:6px;">🤖 Your AI PM — ${esc(DB.getPM(u.assignedPmId)?.name||'')}</div>
+<div style="font-size:11px;color:var(--t3);margin-bottom:10px;">Your PM will use everything in this folder as their knowledge base. Keep it updated for the best results.</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;">
+  <span style="font-size:10px;padding:3px 10px;border-radius:20px;background:var(--bg3);color:${assets.filter(a=>a.assetType==='Logo').length?'var(--green)':'var(--t4)'};">Logo ${assets.filter(a=>a.assetType==='Logo').length?'✓':'✗'}</span>
+  <span style="font-size:10px;padding:3px 10px;border-radius:20px;background:var(--bg3);color:${assets.filter(a=>a.assetType==='Brand Guide').length?'var(--green)':'var(--t4)'};">Brand Guide ${assets.filter(a=>a.assetType==='Brand Guide').length?'✓':'✗'}</span>
+  <span style="font-size:10px;padding:3px 10px;border-radius:20px;background:var(--bg3);color:${assets.filter(a=>a.assetType==='Tone of Voice').length?'var(--green)':'var(--t4)'};">Tone of Voice ${assets.filter(a=>a.assetType==='Tone of Voice').length?'✓':'✗'}</span>
+  <span style="font-size:10px;padding:3px 10px;border-radius:20px;background:var(--bg3);color:${bf.notes?'var(--green)':'var(--t4)'};">Brand Notes ${bf.notes?'✓':'✗'}</span>
+  <span style="font-size:10px;padding:3px 10px;border-radius:20px;background:var(--bg3);color:${assets.filter(a=>a.assetType==='Competitor').length?'var(--green)':'var(--t4)'};">Competitors ${assets.filter(a=>a.assetType==='Competitor').length?'✓':'✗'}</span>
+</div>
+</div>`:''}
+
+</div>`;
 }
+// ── BRAND FOLDER ──
+function triggerBFUpload(type){
+  window._bfUploadType=type;
+  const el=document.getElementById('bf-upload');
+  if(el){el.value='';el.click();}
+}
+
+function uploadBFAsset(e, type){
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  if(!u.brandAssets)u.brandAssets=[];
+  Array.from(e.target.files).forEach(f=>{
+    const r=new FileReader();
+    r.onload=async ev=>{
+      const b64=ev.target.result;
+      const isImg=f.type.startsWith('image/');
+      const asset={id:gid('a'),name:f.name,type:f.type,preview:isImg?b64:null,assetType:type||guessAssetType(f.name),uploadedAt:new Date().toISOString(),persisted:false};
+      u.brandAssets.push(asset);DB.saveUser(u);render();
+      if(isImg){
+        try{
+          const pUrl=await persistImage(b64);
+          const a2=u.brandAssets.find(x=>x.id===asset.id);
+          if(a2){a2.preview=pUrl;a2.persisted=true;}
+          DB.saveUser(u);
+          toast(f.name+' uploaded!','ok');
+        }catch(er){toast(f.name+' saved locally','info');}
+      } else {
+        toast(f.name+' added to brand folder','ok');
+      }
+    };
+    r.readAsDataURL(f);
+  });
+}
+
+function deleteBFAsset(assetId){
+  const u=DB.getUser(S.session.userId);if(!u||!u.brandAssets)return;
+  if(!confirm('Remove this asset from your brand folder?'))return;
+  u.brandAssets=u.brandAssets.filter(a=>a.id!==assetId);
+  DB.saveUser(u);render();
+}
+
+function saveBFNotes(){
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  if(!u.brandFolder)u.brandFolder={};
+  u.brandFolder.notes=document.getElementById('bf-notes')?.value||'';
+  DB.saveUser(u);
+  const saved=document.getElementById('bf-notes-saved');
+  if(saved){saved.style.display='inline';setTimeout(()=>saved.style.display='none',2000);}
+  toast('Brand notes saved!','ok');
+}
+
 function uploadClientAssets(e){
   const u=DB.getUser(S.session.userId);if(!u)return;
   if(!u.brandAssets)u.brandAssets=[];
@@ -4664,7 +4761,7 @@ ${!ps.length?'<div style="color:var(--t4);font-size:10px;padding:10px">No projec
 
 function viewClientAssets(cid){
   const c=DB.getUser(cid);const assets=c?.brandAssets||[];
-  openModal(`<div class="modal-title">Brand Assets — ${esc(c?.name||cid)}</div>
+  openModal(`<div class="modal-title">Brand Folder — ${esc(c?.name||cid)}</div>
 <div class="ag" style="max-height:400px;overflow-y:auto">${assets.map(a=>`<div class="ac2">
 <div class="at">${a.preview?`<img src="${a.preview}"/>`:'<div class="at-ph">📄</div>'}</div>
 <div class="ai2"><div class="an">${esc(a.name)}</div><div class="atp">${a.assetType||'file'}</div></div>
