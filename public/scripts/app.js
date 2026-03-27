@@ -494,10 +494,10 @@ async function persistImage(url){
   // Uploads image to imgbb via server proxy, returns permanent URL
   // Falls back to original URL if upload fails
   try{
-    const r=await fetch('/api/imgbb',{
+    const r=await fetch('/api/supabase-upload',{
       method:'POST',
       headers:_authHeaders(),
-      body:JSON.stringify({image:url})
+      body:JSON.stringify({url,type:'image'})
     });
     if(!r.ok)return url;
     const d=await r.json();
@@ -507,6 +507,8 @@ async function persistImage(url){
     return url;
   }
 }
+
+async function persistVideo(url){try{const r=await fetch('/api/supabase-upload',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,type:'video'})});if(!r.ok)return url;const d=await r.json();return d.url||url;}catch(e){console.warn('Video persist failed:',e.message,'— using original URL');return url;}}
 
 SB.init();
 
@@ -645,6 +647,7 @@ function render(){
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
   app.innerHTML=appBarHTML()+mainHTML();
+
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -801,14 +804,14 @@ function appBarHTML(){
   };
   const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'pms',l:'AI PMs'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
-  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
+  const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Folder'}];
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
-  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
+  const roleLabel=r==='admin'?'Admin':r==='creator'?'AI PM':'Client';
   return`<div class="app-bar">
 <div class="logo"><img src="/Logo.svg" alt="CinexAI" style="height:34px;width:auto"></div>
 <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
 <span class="rb-${r}">${roleLabel}</span>
-<span class="app-bar-name">${S.session?.name}</span>
+${S.session?.role==='client'&&DB.getUser(S.session?.userId)?.logoUrl?`<div style="width:26px;height:26px;border-radius:6px;overflow:hidden;background:var(--bg3);flex-shrink:0"><img src="${DB.getUser(S.session.userId).logoUrl}" style="width:100%;height:100%;object-fit:contain"></div>`:''}<span class="app-bar-name">${S.session?.name}</span>
 <nav class="app-bar-nav">
 ${nav.map(t=>`<button class="nav-btn${S.tab===t.k?' active':''}" onclick="goTab('${t.k}')">${NAV_ICONS[t.k]||''} ${t.l}${t.k==='inbox'&&getUnreadCount()>0?`<span class="nav-badge">${getUnreadCount()}</span>`:''}  </button>`).join('')}
 ${(r==='admin'||r==='creator')&&S.pid?`<button class="nav-btn studio-btn${S.tab==='studio'?' active':''}" onclick="goTab('studio')">◈ Studio</button>`:''}
@@ -827,6 +830,7 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
   <div id="notif-badge" class="notif-count" style="display:none"></div>
 </button>
 </div>
+${S.session?._impersonating?'<button class="btn btn-gold btn-sm" onclick="returnToAdmin()">&#8592; Admin</button>':''}
 <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
 </div>
@@ -889,7 +893,7 @@ function adminDashboard(){
   const df=S.dashF||{q:'',creator:'',client:'',type:'',status:'',from:'',to:''};
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -946,7 +950,7 @@ ${(()=>{
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
 <input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};debounceRender('dash')" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
-<div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Creator</div>
+<div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">AI PM</div>
 <select onchange="S.dashF={...S.dashF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(c=>`<option value="${c.id}"${df.creator===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Client</div>
@@ -969,7 +973,7 @@ ${(()=>{
 <div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="exportDashboardCSV()">Export CSV</button></div>
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Project</th><th>Project ID</th><th>Client</th><th>Type</th><th>Workflow</th><th>Creator</th><th>Created</th><th>Actions</th></tr></thead>
+<table class="tbl"><thead><tr><th>Project</th><th>Project ID</th><th>Client</th><th>Type</th><th>Workflow</th><th>AI PM</th><th>Created</th><th>Actions</th></tr></thead>
 <tbody>${flt.length?flt.map(p=>adminProjRow(p)).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:24px">No projects match filters</td></tr>'}</tbody></table>
 </div></div>`;
 }
@@ -978,7 +982,7 @@ function exportDashboardCSV(){
   const df=S.dashF||{};const ps=DB.getProjects();
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -986,8 +990,8 @@ function exportDashboardCSV(){
     if(df.to&&p.createdAt&&new Date(p.createdAt)>new Date(df.to+'T23:59:59'))return false;
     return true;
   });
-  const rows=[['Project','Client','Client ID','Type','Workflow','Creator','Created','Updated']];
-  flt.forEach(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);rows.push([p.name,cl?.name||'',cl?.clientId||'',MT[p.type]?.label||p.type,p.workflowStatus||'',cr?.name||'',p.createdAt?new Date(p.createdAt).toLocaleDateString():'',p.updatedAt?new Date(p.updatedAt).toLocaleDateString():'']);});
+  const rows=[['Project','Client','Client ID','Type','Workflow','AI PM','Created','Updated']];
+  flt.forEach(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);rows.push([p.name,cl?.name||'',cl?.clientId||'',MT[p.type]?.label||p.type,p.workflowStatus||'',cr?.name||'',p.createdAt?new Date(p.createdAt).toLocaleDateString():'',p.updatedAt?new Date(p.updatedAt).toLocaleDateString():'']);});
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
   dlTxt(csv,'studio_dashboard_'+new Date().toISOString().slice(0,10)+'.csv');
 }
@@ -996,7 +1000,7 @@ function syncToSheets(){
   const u=DB.getUser(S.session?.userId);const url=u?.sheetsUrl;
   if(!url){toast('Set Google Sheets URL in Settings first','err');goTab('settings');return;}
   const ps=DB.getProjects();const us=DB.getUsers();
-  const payload={projects:ps.map(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);return{id:p.id,name:p.name,type:MT[p.type]?.label||p.type,client:cl?.name||'',clientId:cl?.clientId||'',creator:cr?.name||'',status:p.workflowStatus||'',synopsisRevisions:p.synopsisRevisionCount||0,synopsisLocked:p.synopsisLocked||false,storyboardReleased:p.storyboardReleased||false,createdAt:p.createdAt,updatedAt:p.updatedAt};}),clients:us.filter(u=>u.role==='client').map(u=>({id:u.clientId,name:u.name,email:u.email||'',projects:ps.filter(p=>p.clientId===u.id).length,active:u.active!==false})),creators:us.filter(u=>u.role==='creator').map(u=>({name:u.name,username:u.username||'',clients:(u.assignedClients||[]).length,active:u.active!==false})),syncedAt:new Date().toISOString()};
+  const payload={projects:ps.map(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);return{id:p.id,name:p.name,type:MT[p.type]?.label||p.type,client:cl?.name||'',clientId:cl?.clientId||'',aiPm:cr?.name||'',status:p.workflowStatus||'',synopsisRevisions:p.synopsisRevisionCount||0,synopsisLocked:p.synopsisLocked||false,storyboardReleased:p.storyboardReleased||false,createdAt:p.createdAt,updatedAt:p.updatedAt};}),clients:us.filter(u=>u.role==='client').map(u=>({id:u.clientId,name:u.name,email:u.email||'',projects:ps.filter(p=>p.clientId===u.id).length,active:u.active!==false})),creators:us.filter(u=>u.role==='creator').map(u=>({name:u.name,username:u.username||'',clients:(u.assignedClients||[]).length,active:u.active!==false})),syncedAt:new Date().toISOString()};
   // Route through Supabase Edge Function proxy to avoid CORS issues
   // Use SB object directly (already loaded in memory) — more reliable than localStorage
   const sbUrl=SB._url||localStorage.getItem('sb_url')||'';
@@ -1051,7 +1055,7 @@ function adminProjects(){
   const viewMode=S.projView||'kanban'; // kanban | table | cards
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase())&&!(p.projectId||'').includes(df.q)&&!(DB.getUser(p.clientId)?.name||'').toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -1165,7 +1169,7 @@ onmouseout="this.style.borderColor='var(--b2)';this.style.color='var(--t4)'">+ A
 }
 
 function kanbanCard(p){
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const now=new Date();const isOverdue=p.deadline&&new Date(p.deadline)<now&&p.workflowStatus!=='complete';
   const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
   const priColors={high:'var(--red)',medium:'#FF6B35',low:'#3a3a3a'};
@@ -1224,7 +1228,7 @@ function projCards(projects){
   if(!projects.length)return`<div style="text-align:center;color:var(--t4);padding:40px">No projects match filters.</div>`;
   return`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:11px">
 ${projects.map(p=>{
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const wf=p.workflowStatus||'new';const now=new Date();
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
@@ -1261,9 +1265,9 @@ ${(p.comments||[]).length?`<span style="font-size:9px;color:var(--blue)">💬${p
 function projTable(projects){
   if(!projects.length)return`<div style="text-align:center;color:var(--t4);padding:40px">No projects match filters.</div>`;
   return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Project</th><th>ID</th><th>Client</th><th>Creator</th><th>Status</th><th>Priority</th><th>Deadline</th><th>Updated</th><th></th></tr></thead>
+<table class="tbl"><thead><tr><th>Project</th><th>ID</th><th>Client</th><th>AI PM</th><th>Status</th><th>Priority</th><th>Deadline</th><th>Updated</th><th></th></tr></thead>
 <tbody>${projects.map(p=>{
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const wf=p.workflowStatus||'new';const now=new Date();
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
@@ -1291,7 +1295,7 @@ ${(p.comments||[]).length?`<div style="font-size:8px;color:var(--blue)">💬${p.
 
 // ── Project Detail Page (inline, replaces old modal) ──
 function projDetailPage(p){
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const creators=DB.getUsers().filter(u=>u.role==='creator');
   const clients=DB.getUsers().filter(u=>u.role==='client');
   const wf=p.workflowStatus||'new';const now=new Date();
@@ -1346,7 +1350,7 @@ ${wfMiniDots(p)}
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:13px;font-size:10px;line-height:2.1;color:var(--t3)">
 <div style="display:flex;justify-content:space-between"><span><strong style="color:var(--t4)">Type</strong></span><span>${mt?.icon} ${mt?.label||p.type}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Client</strong></span><span style="color:var(--t2)">${cl?esc(cl.name)+' · '+cl.clientId:'Not assigned'}</span></div>
-<div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Creator</strong></span><span style="color:var(--blue)">${cr?esc(cr.name):'Unassigned'}</span></div>
+<div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">AI PM</strong></span><span style="color:var(--blue)">${cr?esc(cr.name):'Unassigned'}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Created</strong></span><span>${p.createdAt?new Date(p.createdAt).toLocaleDateString():''}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Last Updated</strong></span><span>${p.updatedAt?new Date(p.updatedAt).toLocaleDateString():''}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Comments</strong></span><span style="color:var(--blue)">${(p.comments||[]).length}</span></div>
@@ -1378,7 +1382,14 @@ ${wf==='storyboard_in_progress'?`<button class="btn btn-green" style="grid-colum
 ${wf==='storyboard_review'&&p.pendingFeedback?`<button class="btn btn-red btn-sm" style="grid-column:1/-1" onclick="openStudio('${p.id}');setTimeout(()=>{S.stage=2;S.step=2;render()},100)">⚠ View Client Feedback</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="showEditProjModal('${p.id}')">✏ Edit Details</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">👤 Assign</button>
-${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:'<span class="badge badge-green" style="grid-column:1/-1;text-align:center;padding:6px">✓✓ Project Complete</span>'}
+${p.assignedPmId?`<button class="btn btn-outline btn-sm" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(6,182,212,0.08));border-color:rgba(139,92,246,0.4);color:#a78bfa" onclick="runAIPMBriefing('${p.id}')">🤖 Run AI PM Briefing</button>`:`<button class="btn btn-ghost btn-sm" style="grid-column:1/-1;opacity:0.5;font-size:10px" onclick="showAssignModal('${p.id}')">Assign an AI PM to run briefing</button>`}
+${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:`
+<div style="grid-column:1/-1">
+  <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+    <span style="font-size:11px;color:#10B981;font-weight:600">✓✓ Project Complete · ${(p.deliveryFiles||[]).length} file(s) delivered</span>
+    <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="addDeliveryFiles('${p.id}')">+ Add Files</button>
+  </div>
+</div>`}
 </div>
 </div>
 
@@ -1423,7 +1434,7 @@ function showEditProjModal(pid){
 <div class="fg"><label>Deadline</label><input type="date" id="ep-dl" value="${p.deadline||''}"/></div>
 <div class="fg"><label>Tags</label><input type="text" id="ep-tags" value="${esc((p.tags||[]).join(', '))}"/></div>
 <div class="fg"><label>Client</label><select id="ep-cl"><option value="">None</option>${clients.map(c=>`<option value="${c.id}"${p.clientId===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-<div class="fg"><label>Creator</label><select id="ep-cr"><option value="">None</option>${creators.map(c=>`<option value="${c.id}"${p.assignedCreatorId===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>AI PM</label><select id="ep-cr"><option value="">None</option>${DB.getPMs().map(pm=>`<option value="${pm.id}"${p.assignedPmId===pm.id?' selected':''}}>${esc(pm.name)}</option>`).join('')}</select></div>
 </div>
 <div class="fg full"><label>Notes</label><textarea id="ep-notes" rows="2">${esc(p.notes||'')}</textarea></div>
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditProj('${pid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
@@ -1435,7 +1446,7 @@ function doEditProj(pid){
   p.deadline=document.getElementById('ep-dl')?.value||null;
   p.tags=(document.getElementById('ep-tags')?.value||'').split(',').map(t=>t.trim()).filter(Boolean);
   p.clientId=document.getElementById('ep-cl')?.value||null;
-  p.assignedCreatorId=document.getElementById('ep-cr')?.value||null;
+  p.assignedPmId=document.getElementById('ep-cr')?.value||null;
   p.notes=document.getElementById('ep-notes')?.value.trim()||'';
   DB.saveProject(p);closeModal();render();toast('Project updated!','ok');
 }
@@ -1447,7 +1458,83 @@ function markProjComplete(pid){
   p.workflowStatus='complete';
   DB.saveProject(p);render();toast('Project marked complete!','ok');
   pushToRole('admin','complete','Project complete',p.name+' has been marked complete',p.id);
-  if(p.clientId)pushNotif(p.clientId,'complete','Project complete!',p.name+' has been finalised.',p.id);
+  if(p.clientId)pushNotif(p.clientId,'complete','Project complete!',p.name+' has been finalised and is ready for download.',p.id);
+  // Prompt to upload delivery files
+  setTimeout(()=>showDeliveryUploadModal(pid),300);
+}
+
+function showDeliveryUploadModal(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  openModal(`
+<div style="padding:4px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+  <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#10B981,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📦</div>
+  <div>
+    <div style="font-size:15px;font-weight:700;color:var(--t1)">Upload Final Deliverables</div>
+    <div style="font-size:11px;color:var(--t4)">${esc(p.name)} — upload files for the client to download</div>
+  </div>
+</div>
+<div class="ib ib-blue" style="margin-bottom:14px;font-size:11px">Files uploaded here will appear in the client's portal under "Final Deliverables" — they can download them directly.</div>
+<div style="border:2px dashed var(--b2);border-radius:10px;padding:24px;text-align:center;margin-bottom:14px;cursor:pointer;transition:all 0.2s" onclick="document.getElementById('del-upload').click()" id="del-drop-zone">
+  <div style="font-size:28px;margin-bottom:8px">📁</div>
+  <div style="font-size:12px;font-weight:600;color:var(--t2)">Click to upload files</div>
+  <div style="font-size:10px;color:var(--t4);margin-top:4px">MP4, MOV, PNG, JPG, PDF, ZIP — any format</div>
+</div>
+<input type="file" id="del-upload" multiple style="display:none" onchange="uploadDeliveryFiles(event,'${pid}')"/>
+<div id="del-file-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:160px;overflow-y:auto"></div>
+<div class="btn-row" style="margin-top:0">
+  <button class="btn btn-gold" onclick="closeModal();S.detailPid='${pid}';render()">Done</button>
+  <button class="btn btn-ghost" onclick="closeModal();S.detailPid='${pid}';render()">Skip for now</button>
+</div>
+</div>`);
+}
+
+async function uploadDeliveryFiles(e, pid){
+  const p=DB.getProject(pid);if(!p)return;
+  if(!p.deliveryFiles)p.deliveryFiles=[];
+  const listEl=document.getElementById('del-file-list');
+
+  for(const f of Array.from(e.target.files)){
+    const itemId='df_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+    // Show uploading state
+    if(listEl){
+      const div=document.createElement('div');
+      div.id=itemId;
+      div.style.cssText='display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--b1);border-radius:7px;padding:10px;font-size:11px';
+      div.innerHTML=`<span style="font-size:16px">${f.type.startsWith('video/')?'🎬':f.type.startsWith('image/')?'🖼':'📄'}</span><div style="flex:1"><div style="color:var(--t1);font-weight:600">${esc(f.name)}</div><div style="color:var(--t4);font-size:9px">${(f.size/1024/1024).toFixed(1)} MB · Uploading...</div></div><div style="width:14px;height:14px;border:2px solid var(--gold);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>`;
+      listEl.appendChild(div);
+    }
+
+    const r=new FileReader();
+    await new Promise(res=>{
+      r.onload=async ev=>{
+        const b64=ev.target.result;
+        const isImg=f.type.startsWith('image/');
+        let fileUrl=b64; // fallback to base64
+        // Try to upload image to Supabase for permanent URL
+        if(isImg){
+          try{
+            const pUrl=await persistImage(b64);
+            fileUrl=pUrl;
+          }catch(e){}
+        }
+        const df={id:gid('df'),name:f.name,type:f.type,size:f.size,url:fileUrl,uploadedAt:new Date().toISOString(),uploadedBy:S.session?.name||'Admin'};
+        p.deliveryFiles.push(df);
+        DB.saveProject(p);
+        // Update list item
+        const itemEl=document.getElementById(itemId);
+        if(itemEl) itemEl.innerHTML=`<span style="font-size:16px">${f.type.startsWith('video/')?'🎬':f.type.startsWith('image/')?'🖼':'📄'}</span><div style="flex:1"><div style="color:var(--t1);font-weight:600">${esc(f.name)}</div><div style="color:var(--t4);font-size:9px">${(f.size/1024/1024).toFixed(1)} MB · <span style="color:var(--green)">✓ Ready</span></div></div>`;
+        res();
+      };
+      r.readAsDataURL(f);
+    });
+  }
+  toast(e.target.files.length+' file(s) ready for delivery!','ok');
+}
+
+function addDeliveryFiles(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  showDeliveryUploadModal(pid);
 }
 
 function adminClients(){
@@ -1459,20 +1546,20 @@ function adminClients(){
 <button class="btn btn-gold" onclick="showRegModal('client')">+ Register Client</button>
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Client</th><th>Client ID</th><th>Password</th><th>Projects</th><th>Assigned To</th><th>Status</th><th>Actions</th></tr></thead>
+<table class="tbl"><thead><tr><th>Client</th><th>Client ID</th><th>Password</th><th>Projects</th><th>AI PM</th><th>Status</th><th>Actions</th></tr></thead>
 <tbody>${clients.length?clients.map(c=>{
   const pcount=DB.getProjects().filter(p=>p.clientId===c.id).length;
   const emp=emps.find(e=>e.assignedClients?.includes(c.id));
   return`<tr>
-<td><div class="urow"><div class="uav uav-client">${(c.name[0]||'?').toUpperCase()}</div><div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
+<td><div class="urow">${clientAvatar(c,36,8)}<div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
 <td><code style="color:var(--purple);font-size:10px">${c.clientId||'—'}</code></td>
 <td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${pcount}</span></td>
-<td><span style="font-size:10px;color:${emp?'var(--blue)':'var(--t4)'}">${emp?esc(emp.name):'Unassigned'}</span></td>
+<td><span style="font-size:10px;color:${c.assignedPmId?'var(--gold)':'var(--t4)'}">${c.assignedPmId?esc(DB.getPM(c.assignedPmId)?.name||'Unknown PM'):'— No PM'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
 <td><div style="display:flex;gap:4px">
 <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${c.id}')">Edit</button>
-<button class="btn btn-blue btn-sm" onclick="viewAsClient('${c.id}')">View Portal</button>
+<button class="btn btn-blue btn-sm" onclick="viewAsClient('${c.id}')">View Portal</button><button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="adminViewClientChat('${c.id}')">💬 Chat</button>
 <button class="btn btn-${c.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${c.id}')">${c.active!==false?'Deactivate':'Activate'}</button>
 </div></td></tr>`;}).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No clients yet</td></tr>'}</tbody></table>
 </div></div>`;
@@ -1912,7 +1999,7 @@ function adminTimeline(){
   const creators=DB.getUsers().filter(u=>u.role==='creator');
   let filtered=ps.filter(p=>{
     if(gf.q&&!p.name.toLowerCase().includes(gf.q.toLowerCase()))return false;
-    if(gf.creator&&p.assignedCreatorId!==gf.creator)return false;
+    if(gf.creator&&p.assignedPmId!==gf.creator)return false;
     if(gf.status&&p.workflowStatus!==gf.status)return false;
     return true;
   });
@@ -2099,9 +2186,9 @@ function setProjectDeadline(pid,val){const p=DB.getProject(pid);if(!p)return;p.d
 
 function exportTimelineCSV(){
   const ps=DB.getProjects();const now=new Date();
-  const rows=[['Project ID','Project Name','Type','Client','Creator','Status','Created','Deadline','Days Active','Overdue','Stage History']];
+  const rows=[['Project ID','Project Name','Type','Client','AI PM','Status','Created','Deadline','Days Active','Overdue','Stage History']];
   ps.forEach(p=>{
-    const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+    const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
     const days=p.createdAt?daysBetween(p.createdAt,now.toISOString()):0;
     const overdue=p.deadline&&new Date(p.deadline)<now?'Yes':'No';
     const hist=(p.stageHistory||[]).map(h=>h.stage+'@'+new Date(h.enteredAt).toLocaleDateString()).join(' | ');
@@ -2375,11 +2462,14 @@ function clientPMPage(){
   const user=DB.getUser(S.session.userId);
   const assignedPm=user?.assignedPmId?DB.getPM(user.assignedPmId):null;
   const allPms=DB.getPMs().sort((a,b)=>(b.avgRating||0)-(a.avgRating||0));
-  if(S.pmView==='directory'||!assignedPm){
-    S.pmView=null;
+  if(S.pmView==='directory'){
     return clientPMDirectory(allPms);
   }
-  return clientPMChatFull(assignedPm,user);
+  if(assignedPm){
+    return clientPMChatFull(assignedPm,user);
+  }
+  // No PM assigned - show directory to choose one
+  return clientPMDirectory(allPms);
 }
 
 function clientPMProfile(pm,user){
@@ -2768,16 +2858,10 @@ Return ONLY valid JSON:
     // Regular PM response
     try{
       const mem=DB.getPMMemory(pmId,clientId);
-      const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('
-');
+      const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('\n');
       const r=await callClaude(
-        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'
-
-Brand notes: '+mem.brandNotes:''}`,
-        `Recent conversation:
-${recentChats}
-
-Client: ${text}`,
+        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'\n\nBrand notes: '+mem.brandNotes:''}`,
+        `Recent conversation:\n${recentChats}\n\nClient: ${text}`,
         300
       );
       DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:r.trim(),ts:new Date().toISOString()});
@@ -2867,46 +2951,66 @@ function savePMBrandNotes(pmId,clientId){
 }
 
 
-// ── SINGLE IMAGE GENERATION MODE ────────────────────────────────
+// ── QUICK GENERATE — MULTI-MODE ────────────────────────────────
 function singleImageGen(){
+  const mode=S.qgMode||'txt2img';
   const models=IMG_MODELS.filter(m=>!m.tags.includes('img2img'));
+  const i2iModels=IMG_MODELS.filter(m=>m.tags.includes('img2img'));
   const selModel=S.singleGenModel||models[0].id;
-  return`<div style="padding:20px 24px;max-width:800px;margin:0 auto">
-    <div style="margin-bottom:20px">
-      <div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">Quick Generate</div>
-      <div style="font-size:11px;color:var(--t4);margin-top:3px">Generate a single image — perfect for social posts, design work, quick concepts</div>
+  const selI2IModel=S.i2iModel||i2iModels[0]?.id||'fal-ai/flux-pro/kontext';
+  const tab=(k,lbl,ico)=>`<button onclick="S.qgMode='${k}';render()" style="padding:7px 16px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${mode===k?'var(--gold)':'var(--b2)'};background:${mode===k?'rgba(196,157,58,0.15)':'transparent'};color:${mode===k?'var(--gold)':'var(--t3)'};">${ico} ${lbl}</button>`;
+  return`<div style="padding:20px 24px;max-width:820px;margin:0 auto">
+    <div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">✦ Quick Generate</div>
+      <div style="font-size:11px;color:var(--t4);margin-top:3px">Create images instantly — text, image-to-image, or style reference</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('txt2img','Text → Image','📝')}${tab('img2img','Image → Image','🖼')}${tab('styleref','Style Reference','🎨')}</div>
     </div>
-    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:20px;margin-bottom:16px">
-      <div class="fg"><label>Prompt</label>
-        <textarea id="sg-prompt" rows="4" placeholder="Describe the image you want — be specific about subject, style, lighting, mood…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:6px;font-size:12px;resize:vertical;box-sizing:border-box">${S.sgPrompt||''}</textarea>
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:22px;margin-bottom:16px">
+      <div class="fg" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="margin:0">Prompt</label>
+          <button onclick="enhancePromptQG()" id="enhance-btn" class="btn btn-ghost btn-sm" style="font-size:9px;padding:3px 10px;border-color:var(--purple);color:var(--purple)">✦ Enhance Prompt</button>
+        </div>
+        <textarea id="sg-prompt" rows="3" placeholder="Describe what you want — subject, mood, style, lighting, camera angle…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box">${S.sgPrompt||''}</textarea>
+        <div id="enhance-status" style="font-size:9px;color:var(--purple);margin-top:4px;display:none">✦ Enhancing…</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px">
-        <div class="fg"><label>Model</label>
-          <select id="sg-model" onchange="S.singleGenModel=this.value">
-            ${models.map(m=>`<option value="${m.id}"${selModel===m.id?' selected':''}>${m.n}</option>`).join('')}
-          </select>
+      ${mode==='img2img'?`
+      <div style="margin-bottom:14px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">SOURCE IMAGE</label>
+        <div onclick="document.getElementById('i2i-file').click()" style="border:2px dashed var(--b2);border-radius:10px;padding:22px;text-align:center;cursor:pointer" onmouseenter="this.style.borderColor='var(--gold)'" onmouseleave="this.style.borderColor='var(--b2)'">
+          ${S.i2iPreview?`<img src="${S.i2iPreview}" style="max-height:100px;max-width:100%;border-radius:6px;margin-bottom:6px"><div style="font-size:9px;color:var(--t4)">Click to change</div>`:`<div style="font-size:24px;margin-bottom:6px">🖼</div><div style="font-size:11px;color:var(--t3);font-weight:600">Click to upload source image</div><div style="font-size:9px;color:var(--t4);margin-top:3px">AI will transform this image based on your prompt</div>`}
         </div>
-        <div class="fg"><label>Aspect Ratio</label>
-          <select id="sg-ratio">
-            <option value="1:1">1:1 Square</option>
-            <option value="9:16">9:16 Portrait</option>
-            <option value="16:9">16:9 Landscape</option>
-            <option value="4:5">4:5 Instagram</option>
-          </select>
-        </div>
-        <div class="fg"><label>Style</label>
-          <select id="sg-style">
-            ${IMG_TONES.map(t=>`<option value="${t}">${t}</option>`).join('')}
-          </select>
-        </div>
+        <input type="file" id="i2i-file" accept="image/*" style="display:none" onchange="loadI2IImage(this)">
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn btn-gold" style="flex:1" id="sg-btn" onclick="runSingleGen()">✦ Generate Image</button>
-        <button class="btn btn-ghost btn-sm" onclick="runSingleGen(4)">Generate 4×</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="fg"><label>Model</label><select id="sg-model">${i2iModels.map(m=>`<option value="${m.id}"${selI2IModel===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+        <div class="fg"><label>Strength</label><select id="i2i-strength"><option value="0.3">0.3 — Subtle</option><option value="0.5" selected>0.5 — Balanced</option><option value="0.7">0.7 — Strong</option><option value="0.9">0.9 — Major</option></select></div>
+      </div>`:mode==='styleref'?`
+      <div style="margin-bottom:14px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">STYLE REFERENCE</label>
+        <div onclick="document.getElementById('ref-style-file').click()" style="border:2px dashed var(--b2);border-radius:10px;padding:22px;text-align:center;cursor:pointer" onmouseenter="this.style.borderColor='var(--cyan)'" onmouseleave="this.style.borderColor='var(--b2)'">
+          ${S.styleRefPreview?`<img src="${S.styleRefPreview}" style="max-height:100px;max-width:100%;border-radius:6px;margin-bottom:6px"><div style="font-size:9px;color:var(--t4)">Click to change</div>`:`<div style="font-size:24px;margin-bottom:6px">🎨</div><div style="font-size:11px;color:var(--t3);font-weight:600">Click to upload style reference</div><div style="font-size:9px;color:var(--t4);margin-top:3px">AI matches the aesthetic, palette and mood of this image</div>`}
+        </div>
+        <input type="file" id="ref-style-file" accept="image/*" style="display:none" onchange="loadStyleRef(this)">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="fg"><label>Model</label><select id="sg-model">${models.map(m=>`<option value="${m.id}"${selModel===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+        <div class="fg"><label>Aspect Ratio</label><select id="sg-ratio"><option value="1:1">1:1 Square</option><option value="9:16">9:16 Portrait</option><option value="16:9">16:9 Landscape</option><option value="4:5">4:5 Instagram</option></select></div>
+        <div class="fg"><label>Style Influence</label><select id="style-strength"><option value="light">Light</option><option value="medium" selected>Medium</option><option value="strong">Strong</option></select></div>
+      </div>
+      <div style="background:rgba(79,195,247,0.06);border:1px solid rgba(79,195,247,0.15);border-radius:8px;padding:9px 12px;font-size:10px;color:var(--cyan);margin-bottom:14px">💡 AI will analyse your reference and bake its style into the generation.</div>`:`
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="fg"><label>Model</label><select id="sg-model" onchange="S.singleGenModel=this.value">${models.map(m=>`<option value="${m.id}"${selModel===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+        <div class="fg"><label>Aspect Ratio</label><select id="sg-ratio"><option value="1:1">1:1 Square</option><option value="9:16">9:16 Portrait</option><option value="16:9">16:9 Landscape</option><option value="4:5">4:5 Instagram</option></select></div>
+        <div class="fg"><label>Style</label><select id="sg-style">${IMG_TONES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+      </div>`}
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-gold" style="flex:1" id="sg-btn" onclick="runSingleGen()">✦ Generate</button>
+        <button class="btn btn-ghost btn-sm" onclick="runSingleGen(4)">4×</button>
       </div>
     </div>
     <div id="sg-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
-      ${(S.sgResults||[]).map((r,i)=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;overflow:hidden">
+      ${(S.sgResults||[]).map(r=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;overflow:hidden">
         <img src="${r.url}" style="width:100%;aspect-ratio:1;object-fit:cover" onerror="this.style.display='none'">
         <div style="padding:8px;display:flex;gap:6px">
           <a href="${r.url}" download class="btn btn-ghost btn-sm" style="flex:1;text-align:center;font-size:9px">↓ Download</a>
@@ -2916,6 +3020,27 @@ function singleImageGen(){
     </div>
   </div>`;
 }
+
+function loadI2IImage(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.i2iPreview=e.target.result;S.i2iImageData=e.target.result;render();};reader.readAsDataURL(file);}
+function loadStyleRef(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.styleRefPreview=e.target.result;S.styleRefData=e.target.result;render();};reader.readAsDataURL(file);}
+async function enhancePromptQG(){
+  const el=document.getElementById('sg-prompt');const current=el?.value?.trim();
+  if(!current)return toast('Enter a prompt first','err');
+  const btn=document.getElementById('enhance-btn');const status=document.getElementById('enhance-status');
+  if(btn){btn.textContent='Enhancing…';btn.disabled=true;}
+  if(status)status.style.display='block';
+  try{
+    const r=await callClaude(
+      'You are an expert AI image prompt engineer. Transform the user prompt into a rich, detailed, visually specific prompt. Add: lighting details, composition, atmosphere, texture, color palette, technical quality markers. Keep under 150 words. Return ONLY the enhanced prompt.',
+      `Enhance: "${current}"`,300
+    );
+    if(el){el.value=r.trim();S.sgPrompt=r.trim();}
+    toast('Prompt enhanced ✦','ok');
+  }catch(e){toast('Could not enhance prompt','err');}
+  if(btn){btn.textContent='✦ Enhance Prompt';btn.disabled=false;}
+  if(status)status.style.display='none';
+}
+
 
 async function runSingleGen(count=1){
   const prompt=document.getElementById('sg-prompt')?.value?.trim();
@@ -3837,7 +3962,7 @@ function doPost(e) {
     
     // Projects sheet
     let sheet = ss.getSheetByName('Projects') || ss.insertSheet('Projects');
-    if(sheet.getLastRow()===0) sheet.appendRow(['ID','Project ID','Name','Type','Client','Client ID','Creator','Status','Priority','Deadline','Synopsis Revisions','Storyboard Released','Created','Updated']);
+    if(sheet.getLastRow()===0) sheet.appendRow(['ID','Project ID','Name','Type','Client','Client ID','AI PM','Status','Priority','Deadline','Synopsis Revisions','Storyboard Released','Created','Updated']);
     const existingIds = sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),1).getValues().flat();
     data.projects.forEach(p => {
       const row = [p.id,p.projectId||'',p.name,p.type,p.client,p.clientId,p.creator,p.status,p.priority||'',p.deadline||'',p.synopsisRevisions,p.storyboardReleased,p.createdAt,p.updatedAt];
@@ -4088,7 +4213,7 @@ function creatorClients(){
 ${clients.length?clients.map(c=>{
   const ps=DB.getProjects().filter(p=>p.clientId===c.id);
   return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:9px;padding:14px">
-<div class="urow" style="margin-bottom:10px"><div class="uav uav-client">${(c.name[0]||'?').toUpperCase()}</div>
+<div class="urow" style="margin-bottom:10px">${clientAvatar(c,36,8)}
 <div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')} · ${c.clientId||'—'}</div></div></div>
 <div style="font-size:10px;color:var(--t3);margin-bottom:9px">${ps.length} project(s) · ${(c.brandAssets||[]).length} brand assets</div>
 <div class="btn-row" style="margin-top:0">
@@ -4135,7 +4260,7 @@ function clientDashboard(){
   const ps=DB.getProjects().filter(p=>p.clientId===S.session.userId);
   return`<div class="page">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-<div><div class="page-title">My Projects</div><div class="page-sub">Client ID: <strong style="color:var(--purple)">${u?.clientId||'—'}</strong></div></div>
+<div style="display:flex;align-items:center;gap:12px">${u?.logoUrl?`<div style="width:48px;height:48px;border-radius:10px;overflow:hidden;background:var(--bg3);border:1px solid var(--b1)"><img src="${u.logoUrl}" style="width:100%;height:100%;object-fit:contain"></div>`:''}<div><div class="page-title">My Projects</div><div class="page-sub">Client ID: <strong style="color:var(--purple)">${u?.clientId||'—'}</strong></div></div></div>
 <button class="btn btn-gold" onclick="goTab('new')">+ New Project Request</button>
 </div>
 ${ps.length?ps.map(p=>clientProjCard(p)).join(''):`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:12px;padding:50px;text-align:center">
@@ -4250,7 +4375,30 @@ ${!readyShots.length?'<div style="color:var(--t4);font-size:10px;padding:12px;gr
 </div></div>`;
   }
 
-  if(wf==='complete')html+=`<div class="ib ib-green" style="margin-top:12px"><strong>Project Complete!</strong> Your production has been finalised. Contact your account manager to receive final deliverables.</div>`;
+  if(wf==='complete'){
+    const deliveryFiles=p.deliveryFiles||[];
+    html+=`<div style="margin-top:16px;background:linear-gradient(135deg,rgba(16,185,129,0.08),rgba(6,182,212,0.04));border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:18px;">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+  <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#10B981,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🎉</div>
+  <div>
+    <div style="font-size:14px;font-weight:700;color:#10B981">Project Complete!</div>
+    <div style="font-size:11px;color:var(--t4)">Your final deliverables are ready to download below.</div>
+  </div>
+</div>
+${deliveryFiles.length?`
+<div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">📦 Final Deliverables (${deliveryFiles.length} file${deliveryFiles.length>1?'s':''})</div>
+<div style="display:flex;flex-direction:column;gap:8px;">
+${deliveryFiles.map(df=>`<div style="display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;">
+  <span style="font-size:22px;flex-shrink:0">${df.type?.startsWith('video/')?'🎬':df.type?.startsWith('image/')?'🖼️':df.name?.endsWith('.pdf')?'📄':'📁'}</span>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:12px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(df.name)}</div>
+    <div style="font-size:9px;color:var(--t4);margin-top:2px">${df.size?(df.size/1024/1024).toFixed(1)+' MB · ':''} Uploaded ${df.uploadedAt?new Date(df.uploadedAt).toLocaleDateString():''}</div>
+  </div>
+  <a href="${df.url}" download="${esc(df.name)}" class="btn btn-green btn-sm" style="flex-shrink:0;text-decoration:none">⬇ Download</a>
+</div>`).join('')}
+</div>`:`<div style="text-align:center;padding:16px;border:1px dashed rgba(16,185,129,0.3);border-radius:8px;font-size:11px;color:var(--t4)">Files are being prepared — you'll be notified when they're ready to download.</div>`}
+</div>`;
+  }
   return html;
 }
 
@@ -4423,7 +4571,7 @@ async function submitBrief(){
     id:gid('p'),projectId:genProjectId(),type,
     name:(answers.brand||answers.title||answers.show||answers.artist||answers.topic||'New '+mt.label)+' — '+mt.label,
     deadline:null,stageHistory:[{stage:'brief_submitted',enteredAt:new Date().toISOString()}],
-    clientId:S.session.userId,assignedCreatorId:null,
+    clientId:S.session.userId,assignedCreatorId:null,assignedPmId:null,
     clientBrief:{...answers,videoRefUrl:refUrl||'',additionalNotes:notes||''},
     clientRefs:_briefRefs.slice(),
     workflowStatus:'brief_submitted',newBrief:true,
@@ -4462,24 +4610,629 @@ async function submitBrief(){
 // ══════════════════════════════════════
 function clientAssets(){
   const u=DB.getUser(S.session.userId);const assets=u?.brandAssets||[];
-  return`<div class="page">
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-<div><div class="page-title">Brand Assets</div><div class="page-sub">Logos, brand guidelines, reference images — auto-linked to all your projects</div></div>
-<button class="btn btn-gold" onclick="document.getElementById('au').click()">+ Upload Assets</button>
+  const bf=u?.brandFolder||{};
+  const byType=(t)=>assets.filter(a=>a.assetType===t);
+  const pm=u?.assignedPmId?DB.getPM(u.assignedPmId):null;
+
+  // LEFT: file section helper
+  const secHTML=(label,icon,type,hint)=>{
+    const items=byType(type);
+    return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:10px">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+  <div style="display:flex;align-items:center;gap:7px"><span style="font-size:14px">${icon}</span>
+    <div><div style="font-size:11px;font-weight:700;color:var(--t1)">${label}</div>
+    <div style="font-size:9px;color:var(--t4)">${hint}</div></div>
+  </div>
+  <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:2px 9px" onclick="triggerBFUpload('${type}')">+ Add</button>
 </div>
-<input type="file" id="au" multiple accept="image/*,.pdf" style="display:none" onchange="uploadClientAssets(event)"/>
-<div class="ib ib-blue"><strong>How it works:</strong> All assets you upload here are automatically available to our team when working on your projects. Upload brand guides, logos, reference images, or mood boards.</div>
-<div class="ag">
-${assets.map((a,i)=>`<div class="ac2">
-<div class="at">${a.preview?`<img src="${a.preview}" onclick="openImgModal('${esc(a.name)}','${a.preview}')"/>`:'<div class="at-ph">📄</div>'}</div>
-<div class="ai2"><div class="an">${esc(a.name)}</div><div class="atp">${a.assetType||'Asset'}</div></div>
-<div style="padding:4px 8px 6px;display:flex;justify-content:space-between">
-<span style="font-size:8px;color:var(--t4)">${a.uploadedAt?new Date(a.uploadedAt).toLocaleDateString():''}</span>
-<button onclick="deleteClientAsset(${i})" style="background:none;border:none;color:var(--t4);cursor:pointer;font-size:11px">✕</button>
-</div></div>`).join('')}
-${!assets.length?'<div style="grid-column:1/-1;color:var(--t4);font-size:11px;padding:24px;text-align:center">No assets uploaded yet.</div>':''}
-</div></div>`;
+${items.length?`<div style="display:flex;flex-direction:column;gap:4px">${items.map((a,i)=>`<div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:6px 8px">
+  <span style="font-size:14px">${a.type?.startsWith('image/')?'🖼':'📄'}</span>
+  <div style="flex:1;min-width:0"><div style="font-size:10px;color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.name)}</div>
+  <div style="font-size:9px;color:var(--t4)">${a.size?Math.round(a.size/1024)+'KB':''}</div></div>
+  <div style="display:flex;gap:4px;flex-shrink:0">
+    ${a.preview?`<button onclick="openImgModal('${esc(a.name)}','${a.preview}')" class="btn btn-ghost btn-sm" style="font-size:9px;padding:2px 6px" title="View">👁</button>`:''}
+    ${a.preview||a.pdfData?`<a href="${a.preview||a.pdfData}" download="${esc(a.name)}" class="btn btn-ghost btn-sm" style="font-size:9px;padding:2px 6px" title="Download">↓</a>`:''}
+    <button onclick="deleteBFAsset('${a.id}')" class="btn btn-ghost btn-sm" style="font-size:9px;padding:2px 6px;color:var(--red)" title="Delete">✕</button>
+  </div>
+</div>`).join('')}</div>`
+:`<div style="color:var(--t4);font-size:10px;text-align:center;padding:12px;border:1px dashed var(--b2);border-radius:6px">No files yet — click + Add</div>`}
+</div>`;
+  };
+
+  // Brand Book content for right panel
+  const brandBook=assets.find(a=>a.assetType==='Brand Book');
+
+  return`<div class="page">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+  <div><div class="page-title">Brand Folder</div><div class="page-sub">Your brand knowledge base — used by your AI PM for every project</div></div>
+</div>
+<div class="ib ib-blue" style="margin-bottom:16px"><strong>How it works:</strong> Everything here is read by your AI PM before every project. The richer your folder, the more on-brand your output.</div>
+
+<input type="file" id="bf-upload" multiple accept="image/*,.pdf,.doc,.docx,.pptx" style="display:none" onchange="uploadBFAsset(event,window._bfUploadType)"/>
+
+<div style="display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start">
+
+  <!-- LEFT: Upload sections -->
+  <div>
+    <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.07em;margin-bottom:8px">BRAND FILES</div>
+    ${secHTML('Logo & Visual Identity','🎨','Logo','PNG, SVG, or AI formats')}
+    ${secHTML('Brand Guidelines','📘','Brand Guide','PDF with brand rules, fonts, colours')}
+    ${secHTML('Tone of Voice','✍️','Tone of Voice','How your brand speaks and writes')}
+    ${secHTML('Competitor References','🔍','Competitor','Screenshots or competitor content')}
+    ${secHTML('Market Positioning','📊','Positioning','Slides or docs on your market position')}
+    ${secHTML('Mood Board','🎬','Mood Board','Visual references you love')}
+    ${secHTML('Previous Campaigns','📁','Campaign','Past ads, videos, posts')}
+
+    <!-- Brand Notes -->
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:6px">📝 Brand Notes</div>
+      <textarea id="bf-notes" rows="3" placeholder="Describe your brand, target audience, tone, competitors…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);border-radius:6px;padding:8px;font-size:10px;color:var(--t1);resize:vertical;box-sizing:border-box">${esc(bf.notes||'')}</textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:7px">
+        <button class="btn btn-gold btn-sm" onclick="saveBFNotes()" style="font-size:9px">Save Notes</button>
+        <span id="bf-notes-saved" style="font-size:9px;color:var(--green);display:none">✓ Saved</span>
+      </div>
+    </div>
+
+    <!-- PM status -->
+    ${pm?`<div style="background:rgba(196,157,58,0.06);border:1px solid rgba(196,157,58,0.2);border-radius:10px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:700;color:var(--gold);margin-bottom:4px">🤖 ${esc(pm.name)}</div>
+      <div style="font-size:9px;color:var(--t4);margin-bottom:8px">Your dedicated AI PM reads this folder for every project.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
+        ${['Logo','Brand Guide','Tone of Voice','Competitor','Positioning'].map(t=>`<span style="font-size:9px;padding:2px 8px;border-radius:12px;background:var(--bg3);color:${byType(t).length?'var(--green)':'var(--t4)'}">${t} ${byType(t).length?'✓':'✗'}</span>`).join('')}
+        <span style="font-size:9px;padding:2px 8px;border-radius:12px;background:var(--bg3);color:${bf.notes?'var(--green)':'var(--t4)'}">Notes ${bf.notes?'✓':'✗'}</span>
+      </div>
+    </div>`:''}
+  </div>
+
+  <!-- RIGHT: Brand Book viewer -->
+  <div>
+    <div style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.07em;margin-bottom:8px">BRAND BOOK</div>
+    ${brandBook?.pdfData?`
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--t1)">📗 ${esc(brandBook.name)}</div>
+          <div style="font-size:9px;color:var(--t4)">Generated by ${esc(brandBook.generatedBy||'AI PM')} · ${brandBook.uploadedAt?new Date(brandBook.uploadedAt).toLocaleDateString():''}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <a href="${brandBook.pdfData}" download="${esc(brandBook.name)}" class="btn btn-ghost btn-sm" style="font-size:9px">↓ Download</a>
+          <button onclick="deleteBFAsset('${brandBook.id}')" class="btn btn-ghost btn-sm" style="font-size:9px;color:var(--red)">✕</button>
+        </div>
+      </div>
+      <iframe src="${brandBook.pdfData}" style="width:100%;height:600px;border:none" title="Brand Book"></iframe>
+    </div>`:`
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--b1)">
+        <div style="font-size:12px;font-weight:700;color:var(--t1)">📗 AI Brand Book</div>
+        <div style="font-size:9px;color:var(--t4)">Generated by your AI PM — a comprehensive brand reference document</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:500px;gap:12px;background:repeating-linear-gradient(45deg,var(--bg3),var(--bg3) 10px,var(--bg2) 10px,var(--bg2) 20px)">
+        <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:28px 32px;text-align:center;max-width:300px">
+          <div style="font-size:36px;margin-bottom:10px">📗</div>
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:6px">No Brand Book yet</div>
+          <div style="font-size:10px;color:var(--t4);line-height:1.6;margin-bottom:14px">Ask your AI PM to generate a Brand Book from your uploaded files and notes. It will appear here as a viewable PDF.</div>
+          <div style="font-size:9px;color:var(--t4);padding:6px 10px;background:var(--bg3);border-radius:6px">Go to My PM → Ask your PM to generate a Brand Book</div>
+        </div>
+      </div>
+    </div>`}
+  </div>
+
+</div>
+</div>`;
 }
+
+// ── AI PM BRIEFING MODULE ──
+async function runAIPMBriefing(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  const cl=DB.getUser(p.clientId);
+  const pm=DB.getPM(p.assignedPmId);
+  if(!pm){toast('No AI PM assigned to this project','err');return;}
+
+  // Build brand folder context
+  const bf=cl?.brandFolder||{};
+  const assets=cl?.brandAssets||[];
+  const assetSummary=assets.length?assets.map(a=>`• ${a.assetType}: ${a.name}`).join('\n'):'No assets uploaded yet';
+  const brandNotes=bf.notes||'No brand notes provided';
+
+  // Build creator bandwidth context
+  const creators=DB.getUsers().filter(u=>u.role==='creator'&&u.active!==false);
+  const allProjects=DB.getProjects();
+  const creatorBandwidth=creators.map(c=>{
+    const active=allProjects.filter(proj=>proj.assignedCreatorId===c.id&&proj.workflowStatus!=='complete').length;
+    return{name:c.name,id:c.id,active,available:active<3};
+  });
+
+  // Build available models context
+  const imgModels=IMAGE_MODELS?IMAGE_MODELS.slice(0,5).map(m=>m.n).join(', '):'FLUX 1.1 Ultra, FLUX Dev, Recraft V3';
+  const vidModels=VIDEO_MODELS?VIDEO_MODELS.slice(0,5).map(m=>m.n).join(', '):'Google Veo 3, Kling 2.1, Runway Gen-4';
+
+  // Show loading modal
+  openModal(`<div style="padding:8px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+  <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#8B5CF6,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🤖</div>
+  <div>
+    <div style="font-size:16px;font-weight:700;color:var(--t1)">${esc(pm.name)} — AI PM Briefing</div>
+    <div style="font-size:11px;color:var(--t4)">Analysing brand folder and preparing recommendations...</div>
+  </div>
+</div>
+<div id="pm-briefing-body">
+  <div style="display:flex;flex-direction:column;gap:10px;padding:20px;align-items:center">
+    <div style="font-size:24px;animation:spin 1s linear infinite">⚙️</div>
+    <div style="font-size:12px;color:var(--t3)">AI PM is reading your brand folder...</div>
+    <div style="font-size:10px;color:var(--t4);margin-top:4px" id="pm-status">Gathering brand data...</div>
+  </div>
+</div>
+</div>`);
+
+  const setStatus=s=>{const el=document.getElementById('pm-status');if(el)el.textContent=s;};
+
+  try{
+    setStatus('Reading brand folder and project brief...');
+    const prompt=`You are ${pm.name}, an expert AI Project Manager at CinexAI, specialised in ${pm.domain||'media production'}.
+
+PROJECT BRIEF:
+- Project: ${p.name}
+- Type: ${p.type}
+- Client: ${cl?.name||'Unknown'}
+- Brief: ${p.notes||'No brief provided'}
+- Priority: ${p.priority||'Medium'}
+
+CLIENT BRAND FOLDER:
+Brand Notes: ${brandNotes}
+
+Uploaded Assets:
+${assetSummary}
+
+AVAILABLE CREATORS AND BANDWIDTH:
+${creatorBandwidth.map(c=>`- ${c.name}: ${c.active} active projects, ${c.available?'AVAILABLE':'AT CAPACITY'}`).join('\n')}
+
+AVAILABLE IMAGE MODELS: ${imgModels}
+AVAILABLE VIDEO MODELS: ${vidModels}
+
+Your task: Analyse all available information and produce a comprehensive Brand Book and project recommendations.
+
+Return ONLY valid JSON in this exact structure:
+{
+  "brandBook": {
+    "brandOverview": "2-3 sentences describing the brand based on available info",
+    "visualIdentity": "Description of visual identity, colours, style based on assets and notes",
+    "toneOfVoice": "How this brand communicates — formal/casual, aspirational/practical, etc",
+    "targetAudience": "Inferred target audience based on brand and project type",
+    "competitorLandscape": "Competitor insights based on any information provided",
+    "marketPositioning": "Where this brand sits in the market",
+    "creativeApproach": "Recommended creative direction for this project type",
+    "doList": ["3-5 things the creative team should always do for this brand"],
+    "dontList": ["3-5 things to always avoid for this brand"],
+    "keyMessages": ["3-4 key messages this brand wants to communicate"]
+  },
+  "projectRecommendations": {
+    "recommendedCreatorId": "${creatorBandwidth.find(c=>c.available)?.id||creators[0]?.id||''}",
+    "recommendedCreatorName": "${creatorBandwidth.find(c=>c.available)?.name||creators[0]?.name||''}",
+    "creatorReason": "Why this creator is the best fit",
+    "imageModel": "Best image generation model for this project and why",
+    "videoModel": "Best video generation model for this project and why",
+    "estimatedShots": 8,
+    "productionNotes": "Any specific production considerations for this project"
+  },
+  "researchInsights": {
+    "marketTrends": "Current trends relevant to this brand and project type",
+    "competitorActivity": "What competitors are typically doing in this space",
+    "opportunities": "Creative opportunities to differentiate"
+  }
+}`;
+
+    setStatus('AI PM is analysing and generating Brand Book...');
+
+    const k=kC();
+    const headers=_authHeaders({'anthropic-version':'2023-06-01','content-type':'application/json'});
+    if(k)headers['x-api-key']=k;
+
+    const resp=await fetch('/api/claude',{
+      method:'POST',
+      headers,
+      body:JSON.stringify({
+        model:'claude-opus-4-20250514',
+        max_tokens:4000,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+
+    if(!resp.ok){
+      const err=await resp.json();
+      throw new Error(err.error||'API call failed');
+    }
+
+    setStatus('Processing recommendations...');
+    const data=await resp.json();
+    const raw=data.content?.[0]?.text||'';
+
+    let result;
+    try{
+      const jsonStr=raw.replace(/```json|```/g,'').trim();
+      result=JSON.parse(jsonStr);
+    }catch(e){throw new Error('Could not parse AI response. Please try again.');}
+
+    showAIPMBriefingResult(pid,pm,result);
+
+  }catch(e){
+    const body=document.getElementById('pm-briefing-body');
+    if(body)body.innerHTML=`<div style="color:var(--red);padding:20px;text-align:center;font-size:12px">
+      <div style="font-size:24px;margin-bottom:10px">⚠️</div>
+      <strong>Briefing failed</strong><br><br>${esc(e.message)}<br><br>
+      ${!kC()?'<div style="background:rgba(255,107,53,0.1);border:1px solid rgba(255,107,53,0.3);border-radius:8px;padding:12px;margin-top:12px;font-size:11px;color:var(--gold)">💡 Add your Claude API key in Settings → API Keys to enable AI PM briefings</div>':''}
+      <button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="closeModal()">Close</button>
+    </div>`;
+  }
+}
+
+function showAIPMBriefingResult(pid,pm,result){
+  const p=DB.getProject(pid);
+  const bb=result.brandBook||{};
+  const rec=result.projectRecommendations||{};
+  const ri=result.researchInsights||{};
+
+  const section=(title,content)=>`
+<div style="margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">${title}</div>
+  <div style="font-size:11px;color:var(--t2);line-height:1.7;background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:10px">${esc(content)}</div>
+</div>`;
+
+  const listSection=(title,items)=>items?.length?`
+<div style="margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">${title}</div>
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:10px">
+    ${items.map(i=>`<div style="font-size:11px;color:var(--t2);padding:3px 0;border-bottom:1px solid var(--b1);display:flex;gap:8px"><span style="color:var(--gold);flex-shrink:0">•</span>${esc(i)}</div>`).join('')}
+  </div>
+</div>`:'';
+
+  const body=document.getElementById('pm-briefing-body');
+  if(!body)return;
+
+  body.innerHTML=`
+<div style="max-height:65vh;overflow-y:auto;padding-right:4px">
+
+  <!-- TABS -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--b1);padding-bottom:10px">
+    <button onclick="pmTab('brand',this)" id="pmt-brand" class="btn btn-gold btn-sm">📘 Brand Book</button>
+    <button onclick="pmTab('project',this)" id="pmt-project" class="btn btn-ghost btn-sm">🎬 Project Recs</button>
+    <button onclick="pmTab('research',this)" id="pmt-research" class="btn btn-ghost btn-sm">🔍 Research</button>
+  </div>
+
+  <!-- BRAND BOOK TAB -->
+  <div id="pmtab-brand">
+    ${section('Brand Overview',bb.brandOverview||'—')}
+    ${section('Visual Identity',bb.visualIdentity||'—')}
+    ${section('Tone of Voice',bb.toneOfVoice||'—')}
+    ${section('Target Audience',bb.targetAudience||'—')}
+    ${section('Market Positioning',bb.marketPositioning||'—')}
+    ${section('Creative Approach for This Project',bb.creativeApproach||'—')}
+    ${listSection('✅ Always Do',bb.doList)}
+    ${listSection('❌ Always Avoid',bb.dontList)}
+    ${listSection('💬 Key Messages',bb.keyMessages)}
+  </div>
+
+  <!-- PROJECT RECS TAB (hidden) -->
+  <div id="pmtab-project" style="display:none">
+    <div style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(6,182,212,0.05));border:1px solid rgba(139,92,246,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:8px">👤 Recommended Creator</div>
+      <div style="font-size:14px;font-weight:700;color:var(--t1);margin-bottom:4px">${esc(rec.recommendedCreatorName||'None available')}</div>
+      <div style="font-size:11px;color:var(--t3)">${esc(rec.creatorReason||'')}</div>
+      ${rec.recommendedCreatorId?`<button class="btn btn-gold btn-sm" style="margin-top:10px" onclick="approvePMCreator('${pid}','${rec.recommendedCreatorId}','${esc(rec.recommendedCreatorName||'')}')">✓ Assign This Creator</button>`:''}
+    </div>
+    ${section('🖼 Recommended Image Model',rec.imageModel||'—')}
+    ${section('🎬 Recommended Video Model',rec.videoModel||'—')}
+    ${section('📋 Production Notes',rec.productionNotes||'—')}
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;font-size:11px;color:var(--t3)">
+      Estimated shots: <strong style="color:var(--t1)">${rec.estimatedShots||8}</strong>
+    </div>
+  </div>
+
+  <!-- RESEARCH TAB (hidden) -->
+  <div id="pmtab-research" style="display:none">
+    ${section('📈 Market Trends',ri.marketTrends||'—')}
+    ${section('🏢 Competitor Activity',ri.competitorActivity||'—')}
+    ${section('💡 Creative Opportunities',ri.opportunities||'—')}
+  </div>
+
+</div>
+
+<!-- ACTIONS -->
+<div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--b1);flex-wrap:wrap">
+  <button class="btn btn-gold" onclick="generateBrandBook('${pid}')
+  <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+</div>`;
+
+  // Store result for later use
+  window._pmBriefingResult={pid,pm,result};
+}
+
+function pmTab(tab,btn){
+  ['brand','project','research'].forEach(t=>{
+    const el=document.getElementById('pmtab-'+t);
+    const b=document.getElementById('pmt-'+t);
+    if(el)el.style.display=t===tab?'block':'none';
+    if(b){b.className=t===tab?'btn btn-gold btn-sm':'btn btn-ghost btn-sm';}
+  });
+}
+
+function approvePMCreator(pid, creatorId, creatorName){
+  const p=DB.getProject(pid);if(!p)return;
+  p.assignedCreatorId=creatorId;
+  DB.saveProject(p);
+  toast(creatorName+' assigned to project!','ok');
+  closeModal();
+  S.detailPid=pid;
+  render();
+}
+
+async function generateBrandBook(pid){
+  const result=window._pmBriefingResult?.result;
+  const p=DB.getProject(pid);
+  const cl=DB.getUser(p?.clientId);
+  const pm=DB.getPM(p?.assignedPmId);
+  const bb=result?.brandBook||{};
+  const rec=result?.projectRecommendations||{};
+  const ri=result?.researchInsights||{};
+
+  toast('Generating Brand Book PDF...','info');
+
+  // Load jsPDF dynamically
+  if(!window.jspdf){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      s.onload=res;s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W=210;const H=297;const M=20;const TW=W-M*2;
+  let y=M;
+
+  const addPage=()=>{doc.addPage();y=M;};
+  const checkPage=(h=20)=>{if(y+h>H-M)addPage();};
+
+  const drawRect=(x,fy,w,h,r,fill)=>{
+    if(fill)doc.setFillColor(...fill);
+    if(r){doc.roundedRect(x,fy,w,h,r,r,fill?'F':'S');}
+    else{doc.rect(x,fy,w,h,fill?'F':'S');}
+  };
+
+  const addText=(text,x,fy,opts={})=>{
+    doc.setFont(opts.font||'helvetica',opts.style||'normal');
+    doc.setFontSize(opts.size||10);
+    doc.setTextColor(...(opts.color||[30,30,30]));
+    const lines=doc.splitTextToSize(text||'—',opts.maxW||TW);
+    doc.text(lines,x,fy,{align:opts.align||'left'});
+    return lines.length*(opts.size||10)*0.4+2;
+  };
+
+  // ─── COVER PAGE ───
+  drawRect(0,0,W,H,0,[10,10,20]);
+  drawRect(0,H-60,W,60,0,[139,92,246]);
+  doc.setFillColor(139,92,246);
+  doc.circle(W/2,H/2-20,60,'F');
+  doc.setFillColor(20,20,40);
+  doc.circle(W/2,H/2-20,55,'F');
+
+  addText('BRAND BOOK',W/2,H/2-35,{size:28,style:'bold',color:[255,255,255],align:'center'});
+  addText(cl?.name||'Client Brand',W/2,H/2-18,{size:14,color:[167,139,250],align:'center'});
+  addText(`Prepared by ${pm?.name||'AI PM'} · CinexAI`,W/2,H/2+5,{size:10,color:[100,100,140],align:'center'});
+  addText(new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}),W/2,H/2+14,{size:9,color:[80,80,120],align:'center'});
+  addText('CONFIDENTIAL — FOR INTERNAL USE ONLY',W/2,H-30,{size:8,color:[100,100,140],align:'center'});
+
+  // ─── PAGE 2: BRAND OVERVIEW ───
+  addPage();
+  doc.setFillColor(139,92,246);
+  doc.rect(M,y,TW,1,'F');
+  y+=5;
+  addText('1. BRAND OVERVIEW',M,y,{size:16,style:'bold',color:[139,92,246]});y+=10;
+
+  const sections=[
+    ['Brand Overview',bb.brandOverview],
+    ['Visual Identity',bb.visualIdentity],
+    ['Tone of Voice',bb.toneOfVoice],
+    ['Target Audience',bb.targetAudience],
+  ];
+
+  for(const [title,text] of sections){
+    checkPage(30);
+    addText(title.toUpperCase(),M,y,{size:8,style:'bold',color:[139,92,246]});y+=5;
+    const h=addText(text||'—',M,y,{size:10,color:[50,50,60]});
+    y+=h+8;
+    doc.setDrawColor(230,230,240);
+    doc.line(M,y,M+TW,y);y+=6;
+  }
+
+  // ─── PAGE 3: MARKET & POSITIONING ───
+  addPage();
+  doc.setFillColor(6,182,212);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('2. MARKET POSITIONING & RESEARCH',M,y,{size:16,style:'bold',color:[6,182,212]});y+=10;
+
+  const mSections=[
+    ['Market Positioning',bb.marketPositioning],
+    ['Competitor Landscape',bb.competitorLandscape],
+    ['Market Trends',ri.marketTrends],
+    ['Competitor Activity',ri.competitorActivity],
+    ['Creative Opportunities',ri.opportunities],
+  ];
+
+  for(const [title,text] of mSections){
+    checkPage(30);
+    addText(title.toUpperCase(),M,y,{size:8,style:'bold',color:[6,182,212]});y+=5;
+    const h=addText(text||'—',M,y,{size:10,color:[50,50,60]});
+    y+=h+8;
+    doc.setDrawColor(230,230,240);
+    doc.line(M,y,M+TW,y);y+=6;
+  }
+
+  // ─── PAGE 4: CREATIVE GUIDELINES ───
+  addPage();
+  doc.setFillColor(245,158,11);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('3. CREATIVE GUIDELINES',M,y,{size:16,style:'bold',color:[180,120,10]});y+=10;
+
+  addText('CREATIVE APPROACH',M,y,{size:8,style:'bold',color:[180,120,10]});y+=5;
+  const ch=addText(bb.creativeApproach||'—',M,y,{size:10,color:[50,50,60]});y+=ch+10;
+
+  // Do list
+  if(bb.doList?.length){
+    checkPage(20);
+    addText('✅ ALWAYS DO',M,y,{size:9,style:'bold',color:[16,185,129]});y+=6;
+    for(const item of bb.doList){
+      checkPage(10);
+      const h2=addText('• '+item,M+3,y,{size:10,color:[50,50,60]});
+      y+=h2+2;
+    }
+    y+=6;
+  }
+
+  // Don't list
+  if(bb.dontList?.length){
+    checkPage(20);
+    addText('❌ ALWAYS AVOID',M,y,{size:9,style:'bold',color:[239,68,68]});y+=6;
+    for(const item of bb.dontList){
+      checkPage(10);
+      const h2=addText('• '+item,M+3,y,{size:10,color:[50,50,60]});
+      y+=h2+2;
+    }
+    y+=6;
+  }
+
+  // Key messages
+  if(bb.keyMessages?.length){
+    checkPage(20);
+    addText('💬 KEY MESSAGES',M,y,{size:9,style:'bold',color:[139,92,246]});y+=6;
+    bb.keyMessages.forEach((msg,i)=>{
+      checkPage(14);
+      drawRect(M,y,TW,12,3,[245,243,255]);
+      addText(`${i+1}. ${msg}`,M+4,y+8,{size:10,color:[80,60,140],maxW:TW-8});
+      y+=15;
+    });
+  }
+
+  // ─── PAGE 5: PRODUCTION RECOMMENDATIONS ───
+  addPage();
+  doc.setFillColor(139,92,246);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('4. PRODUCTION RECOMMENDATIONS',M,y,{size:16,style:'bold',color:[139,92,246]});y+=12;
+
+  // Creator rec box
+  drawRect(M,y,TW,30,4,[245,243,255]);
+  addText('RECOMMENDED CREATOR',M+5,y+7,{size:8,style:'bold',color:[139,92,246]});
+  addText(rec.recommendedCreatorName||'TBD',M+5,y+15,{size:14,style:'bold',color:[70,50,130]});
+  addText(rec.creatorReason||'',M+5,y+22,{size:9,color:[100,80,160],maxW:TW-10});
+  y+=36;
+
+  // Models
+  const modelSections=[
+    ['IMAGE GENERATION MODEL',rec.imageModel,'#E0F2FE'],
+    ['VIDEO GENERATION MODEL',rec.videoModel,'#F0FDF4'],
+  ];
+  for(const [title,text,bg] of modelSections){
+    drawRect(M,y,TW,22,3,bg.match(/[\da-f]{2}/gi).map(v=>parseInt(v,16)));
+    addText(title,M+5,y+7,{size:8,style:'bold',color:[60,60,80]});
+    const h2=addText(text||'—',M+5,y+13,{size:10,color:[40,40,60],maxW:TW-10});
+    y+=27;
+  }
+
+  y+=4;
+  addText('PRODUCTION NOTES',M,y,{size:9,style:'bold',color:[60,60,80]});y+=6;
+  addText(rec.productionNotes||'—',M,y,{size:10,color:[50,50,60]});
+
+  // ─── FOOTER on each page ───
+  const totalPages=doc.getNumberOfPages();
+  for(let i=1;i<=totalPages;i++){
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150,150,170);
+    doc.text(`CinexAI Brand Book — ${cl?.name||'Client'} — Confidential`,M,H-8);
+    doc.text(`Page ${i} of ${totalPages}`,W-M,H-8,{align:'right'});
+  }
+
+  // Save and store in brand folder
+  const pdfBase64=doc.output('datauristring');
+  const fileName=`Brand_Book_${(cl?.name||'Brand').replace(/\s+/g,'_')}_${Date.now()}.pdf`;
+
+  // Store in brand folder
+  const u=DB.getUser(p.clientId);
+  if(u){
+    if(!u.brandAssets)u.brandAssets=[];
+    // Remove old brand books
+    u.brandAssets=u.brandAssets.filter(a=>a.assetType!=='Brand Book');
+    u.brandAssets.unshift({
+      id:gid('bb'),
+      name:fileName,
+      type:'application/pdf',
+      preview:null,
+      pdfData:pdfBase64,
+      assetType:'Brand Book',
+      generatedBy:pm?.name||'AI PM',
+      uploadedAt:new Date().toISOString(),
+      persisted:false
+    });
+    DB.saveUser(u);
+  }
+
+  // Download
+  doc.save(fileName);
+  toast('Brand Book PDF generated and saved to Brand Folder!','ok');
+  closeModal();
+}
+
+// ── BRAND FOLDER ──
+function triggerBFUpload(type){
+  window._bfUploadType=type;
+  const el=document.getElementById('bf-upload');
+  if(el){el.value='';el.click();}
+}
+
+function uploadBFAsset(e, type){
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  if(!u.brandAssets)u.brandAssets=[];
+  Array.from(e.target.files).forEach(f=>{
+    const r=new FileReader();
+    r.onload=async ev=>{
+      const b64=ev.target.result;
+      const isImg=f.type.startsWith('image/');
+      const asset={id:gid('a'),name:f.name,type:f.type,preview:isImg?b64:null,assetType:type||guessAssetType(f.name),uploadedAt:new Date().toISOString(),persisted:false};
+      u.brandAssets.push(asset);DB.saveUser(u);render();
+      if(isImg){
+        try{
+          const pUrl=await persistImage(b64);
+          const a2=u.brandAssets.find(x=>x.id===asset.id);
+          if(a2){a2.preview=pUrl;a2.persisted=true;}
+          DB.saveUser(u);
+          toast(f.name+' uploaded!','ok');
+        }catch(er){toast(f.name+' saved locally','info');}
+      } else {
+        toast(f.name+' added to brand folder','ok');
+      }
+    };
+    r.readAsDataURL(f);
+  });
+}
+
+function deleteBFAsset(assetId){
+  const u=DB.getUser(S.session.userId);if(!u||!u.brandAssets)return;
+  if(!confirm('Remove this asset from your brand folder?'))return;
+  u.brandAssets=u.brandAssets.filter(a=>a.id!==assetId);
+  DB.saveUser(u);render();
+}
+
+function saveBFNotes(){
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  if(!u.brandFolder)u.brandFolder={};
+  u.brandFolder.notes=document.getElementById('bf-notes')?.value||'';
+  DB.saveUser(u);
+  const saved=document.getElementById('bf-notes-saved');
+  if(saved){saved.style.display='inline';setTimeout(()=>saved.style.display='none',2000);}
+  toast('Brand notes saved!','ok');
+}
+
 function uploadClientAssets(e){
   const u=DB.getUser(S.session.userId);if(!u)return;
   if(!u.brandAssets)u.brandAssets=[];
@@ -4513,14 +5266,38 @@ function guessAssetType(n){const nl=n.toLowerCase();if(nl.includes('logo'))retur
 // ══════════════════════════════════════
 // MODALS
 // ══════════════════════════════════════
+// Client avatar helper — shows logo if available, else initial
+function clientAvatar(u, size=36, radius=8){
+  if(!u)return'<div class="uav uav-client">?</div>';
+  var initial=(u.name[0]||'?').toUpperCase();
+  var sz=size!==36?'width:'+size+'px;height:'+size+'px;font-size:'+Math.round(size*0.38)+'px;border-radius:'+radius+'px;':'';
+  if(u.logoUrl){
+    return'<div style="width:'+size+'px;height:'+size+'px;border-radius:'+radius+'px;overflow:hidden;background:var(--bg3);flex-shrink:0"><img src="'+esc(u.logoUrl)+'" style="width:100%;height:100%;object-fit:contain" /></div>';
+  }
+  return'<div class="uav uav-client" style="'+sz+'">'+initial+'</div>';
+}
+
 function showRegModal(role){
   const ic=role==='client';
+  const pms=DB.getPMs();
   openModal(`<div class="modal-title">${ic?'Register New Client':'Add Creator'}</div>
+${ic?`<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+  <div id="reg-logo-preview" style="width:60px;height:60px;border-radius:12px;background:var(--bg3);border:2px dashed var(--b2);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex-shrink:0" onclick="document.getElementById('reg-logo-file').click()" title="Upload client logo">
+    <span style="font-size:22px">🏢</span>
+  </div>
+  <div style="flex:1">
+    <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:3px">Client Logo</div>
+    <div style="font-size:9px;color:var(--t4);margin-bottom:6px">Shows as avatar across the platform</div>
+    <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="document.getElementById('reg-logo-file').click()">+ Upload Logo</button>
+  </div>
+  <input type="file" id="reg-logo-file" accept="image/*" style="display:none" onchange="previewRegLogo(this)">
+</div>`:''}
 <div class="fg"><label>Full Name</label><input type="text" id="rn" placeholder="e.g. Priya Sharma"/></div>
 <div class="fg"><label>Email</label><input type="text" id="re" placeholder="email@company.com"/></div>
 ${!ic?'<div class="fg"><label>Username (for login)</label><input type="text" id="ru" placeholder="e.g. priya.sharma"/></div>':''}
 <div class="fg"><label>Password ${ic?'(auto-generated if blank)':''}</label><input type="text" id="rp" value="${ic?gpw():''}"/></div>
-<div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'Creator'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+${ic?`<div class="fg"><label>Assign AI PM <span style="font-size:9px;color:var(--t4);font-weight:400">(auto-assigned to all their projects)</span></label><select id="rpm"><option value="">— No PM assigned yet —</option>${pms.map(pm=>`<option value="${pm.id}">${esc(pm.name)} · ${esc(pm.domain)}</option>`).join('')}</select></div>`:''}
+<div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'AI PM'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doRegister(role){
   const name=document.getElementById('rn')?.value.trim();if(!name){toast('Name required','err');return}
@@ -4529,9 +5306,9 @@ function doRegister(role){
   const username=document.getElementById('ru')?.value.trim()||name.toLowerCase().replace(/\s+/g,'.');
   const ic=role==='client';
   const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString()};
-  if(ic)u.clientId=gcid();else u.username=username;
+  if(ic){u.clientId=gcid();const pmId=document.getElementById('rpm')?.value||null;if(pmId)u.assignedPmId=pmId;const logo=window._regLogoData;if(logo){u.logoUrl=logo;window._regLogoData=null;}}else u.username=username;
   DB.saveUser(u);closeModal();render();
-  toast(`${ic?'Client':'Creator'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
+  toast(`${ic?'Client':'AI PM'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
 }
 
@@ -4543,6 +5320,16 @@ function showEditUserModal(uid){
 <div class="fg"><label>Password</label><input type="password" id="eu-p" value="${esc(u.password||'')}"/></div>
 ${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <strong style="color:var(--purple)">${u.clientId}</strong></div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+}
+function previewRegLogo(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    window._regLogoData=e.target.result;
+    const preview=document.getElementById('reg-logo-preview');
+    if(preview)preview.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:contain;border-radius:10px">`;
+  };
+  reader.readAsDataURL(file);
 }
 function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
 function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);auditLog('user_status_changed',u.active?'Activated':'Deactivated',uid);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
@@ -4568,11 +5355,11 @@ function showAssignModal(pid){
   const emps=DB.getUsers().filter(u=>u.role==='creator');
   const clients=DB.getUsers().filter(u=>u.role==='client');
   openModal(`<div class="modal-title">Assign — ${esc(p.name)}</div>
-<div class="fg"><label>Creator</label><select id="ae"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}"${p.assignedCreatorId===e.id?' selected':''}>${esc(e.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>AI PM</label><select id="ae"><option value="">Unassigned</option>${DB.getPMs().map(pm=>`<option value="${pm.id}"${p.assignedPmId===pm.id?' selected':''}}>${esc(pm.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Client</label><select id="ac"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${p.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
 <div class="btn-row"><button class="btn btn-gold" onclick="saveAssignment('${pid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
-function saveAssignment(pid){const p=DB.getProject(pid);if(!p)return;p.assignedCreatorId=document.getElementById('ae')?.value||null;p.clientId=document.getElementById('ac')?.value||null;DB.saveProject(p);closeModal();render();toast('Saved!','ok');}
+function saveAssignment(pid){const p=DB.getProject(pid);if(!p)return;p.assignedPmId=document.getElementById('ae')?.value||null;p.clientId=document.getElementById('ac')?.value||null;DB.saveProject(p);closeModal();render();toast('Saved!','ok');}
 
 function showNewProjModal(prefill){
   const clients=DB.getUsers().filter(u=>u.role==='client');
@@ -4601,7 +5388,7 @@ ${[{v:'low',l:'Low',c:'var(--t4)',bg:'var(--bg3)'},{v:'medium',l:'Medium',c:'#F5
 <div class="section-lbl">Assignment & Timeline</div>
 <div class="form2">
 <div class="fg"><label>Link Client</label><select id="np-c"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${pf.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
-<div class="fg"><label>Assign Creator</label><select id="np-e"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>Assign AI PM</label><select id="np-e"><option value="">Unassigned</option>${DB.getPMs().map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Deadline</label><input type="date" id="np-dl" value="${pf.deadline||''}"/></div>
 <div class="fg"><label>Tags</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
 </div>
@@ -4614,7 +5401,7 @@ function doNewProject(){
   const name=document.getElementById('np-n')?.value.trim();if(!name){toast('Name required','err');return}
   const type=document.getElementById('np-t')?.value;
   const clientId=document.getElementById('np-c')?.value||null;
-  const empId=document.getElementById('np-e')?.value||null;
+  const pmId=document.getElementById('np-e')?.value||null;
   const deadline=document.getElementById('np-dl')?.value||null;
   const notes=document.getElementById('np-notes')?.value.trim()||'';
   const tagsRaw=document.getElementById('np-tags')?.value||'';
@@ -4622,7 +5409,10 @@ function doNewProject(){
   const priority=document.getElementById('np-pri')?.value||'medium';
   const mt=MT[type];
   const initWf=document.getElementById('np-wfinit')?.value||null;
-  const p={id:gid('p'),projectId:genProjectId(),type,name,clientId,assignedCreatorId:empId,
+  // Auto-assign client's dedicated PM if none explicitly chosen
+  const clientUser=clientId?DB.getUser(clientId):null;
+  const finalPmId=pmId||(clientUser?.assignedPmId)||null;
+  const p={id:gid('p'),projectId:genProjectId(),type,name,clientId,assignedCreatorId:null,assignedPmId:finalPmId,
     workflowStatus:initWf||(clientId?'brief_submitted':'new'),
     priority,tags,
     clientBrief:{},clientRefs:[],brief:{},script:'',bible:{},shots:[],refs:[],sbState:{},
@@ -4639,7 +5429,7 @@ function doNewProject(){
   // Open detail view instead of jumping straight to Studio
   S.tab='projects';S.detailPid=p.id;render();
   pushToRole('admin','project','New project created',p.name+' ('+p.projectId+')',p.id);
-  if(empId)pushNotif(empId,'project','New project assigned',p.name+' assigned to you',p.id);
+  if(pmId){const pm=DB.getPM(pmId);if(pm)toast('Project assigned to '+pm.name+' (AI PM)','ok');}
   if(clientId)pushNotif(clientId,'project','Project started',p.name+' has been set up for you',p.id);
 }
 
@@ -4658,7 +5448,7 @@ ${!ps.length?'<div style="color:var(--t4);font-size:10px;padding:10px">No projec
 
 function viewClientAssets(cid){
   const c=DB.getUser(cid);const assets=c?.brandAssets||[];
-  openModal(`<div class="modal-title">Brand Assets — ${esc(c?.name||cid)}</div>
+  openModal(`<div class="modal-title">Brand Folder — ${esc(c?.name||cid)}</div>
 <div class="ag" style="max-height:400px;overflow-y:auto">${assets.map(a=>`<div class="ac2">
 <div class="at">${a.preview?`<img src="${a.preview}"/>`:'<div class="at-ph">📄</div>'}</div>
 <div class="ai2"><div class="an">${esc(a.name)}</div><div class="atp">${a.assetType||'file'}</div></div>
@@ -4671,7 +5461,8 @@ function openModal(html){document.getElementById('modal-root').innerHTML=`<div c
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
-function viewAsClient(cid){const og=S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
+function viewAsClient(cid){const og=S.session.userId;const ogName=S.session.name;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,_ogName:ogName,_impersonating:true,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();}
+function returnToAdmin(){if(!S.session._og)return;S.session={...S.session,userId:S.session._og,name:S.session._ogName||'Admin',role:'admin',_og:null,_ogName:null,_impersonating:false};S.view='admin';S.tab='dashboard';render();}
 
 // ══════════════════════════════════════
 // STUDIO
@@ -6313,7 +7104,7 @@ async function doVid(p,vp){
   try{
     for(let a=0;a<=2;a++){
       try{
-        const url=await falVid(imgUrl,prompt,dur,rat);
+        const rawUrl=await falVid(imgUrl,prompt,dur,rat);const url=await persistVideo(rawUrl);
         S.vidState[vp.num]={url,status:'done',frameUrl:imgUrl,modelId,dur,rat};
         setVb(vp.num,'done','done');setVv(vp.num,url);
         break;
