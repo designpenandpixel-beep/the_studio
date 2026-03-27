@@ -1390,6 +1390,7 @@ ${wf==='storyboard_in_progress'?`<button class="btn btn-green" style="grid-colum
 ${wf==='storyboard_review'&&p.pendingFeedback?`<button class="btn btn-red btn-sm" style="grid-column:1/-1" onclick="openStudio('${p.id}');setTimeout(()=>{S.stage=2;S.step=2;render()},100)">⚠ View Client Feedback</button>`:''}
 <button class="btn btn-ghost btn-sm" onclick="showEditProjModal('${p.id}')">✏ Edit Details</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">👤 Assign</button>
+${p.assignedPmId?`<button class="btn btn-outline btn-sm" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(6,182,212,0.08));border-color:rgba(139,92,246,0.4);color:#a78bfa" onclick="runAIPMBriefing('${p.id}')">🤖 Run AI PM Briefing</button>`:'<button class="btn btn-ghost btn-sm" style="grid-column:1/-1;opacity:0.5;font-size:10px" onclick="showAssignModal('${p.id}')">Assign an AI PM to run briefing</button>'}
 ${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:'<span class="badge badge-green" style="grid-column:1/-1;text-align:center;padding:6px">✓✓ Project Complete</span>'}
 </div>
 </div>
@@ -4508,6 +4509,25 @@ ${secHTML('Market Positioning','📊','Positioning','Documents or slides describ
 ${secHTML('Mood Board & References','🎬','Mood Board','Visual references, stills, or content you love')}
 ${secHTML('Previous Campaigns','📁','Campaign','Past work — ads, videos, posts — so the PM understands your history')}
 
+<!-- BRAND BOOKS (AI Generated) -->
+${assets.filter(a=>a.assetType==='Brand Book').length?`
+<div style="background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(6,182,212,0.04));border:1px solid rgba(139,92,246,0.25);border-radius:10px;padding:14px;margin-bottom:12px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:16px">📗</span><div><div style="font-size:12px;font-weight:700;color:#a78bfa">AI-Generated Brand Books</div><div style="font-size:10px;color:var(--t4)">Created by your AI PM — comprehensive brand reference</div></div></div>
+  </div>
+  ${assets.filter(a=>a.assetType==='Brand Book').map((a,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border-radius:8px;padding:10px;margin-bottom:6px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px">📗</span>
+      <div><div style="font-size:11px;font-weight:600;color:var(--t1)">${esc(a.name)}</div>
+      <div style="font-size:9px;color:var(--t4)">By ${esc(a.generatedBy||'AI PM')} · ${a.uploadedAt?new Date(a.uploadedAt).toLocaleDateString():''}</div></div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      ${a.pdfData?`<a href="${a.pdfData}" download="${esc(a.name)}" class="btn btn-outline btn-sm">⬇ Download</a>`:''}
+      <button onclick="deleteBFAsset('${a.id}')" class="btn btn-ghost btn-sm" style="color:var(--t4)">✕</button>
+    </div>
+  </div>`).join('')}
+</div>`:''}
+
 <!-- BRAND NOTES -->
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:14px;margin-bottom:12px;">
   <div style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:8px;">📝 Brand Notes <span style="font-size:10px;font-weight:400;color:var(--t4);margin-left:6px;">Free-text context for your AI PM</span></div>
@@ -4533,6 +4553,467 @@ ${u?.assignedPmId?`<div style="background:linear-gradient(135deg,rgba(99,102,241
 
 </div>`;
 }
+// ── AI PM BRIEFING MODULE ──
+async function runAIPMBriefing(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  const cl=DB.getUser(p.clientId);
+  const pm=DB.getPM(p.assignedPmId);
+  if(!pm){toast('No AI PM assigned to this project','err');return;}
+
+  // Build brand folder context
+  const bf=cl?.brandFolder||{};
+  const assets=cl?.brandAssets||[];
+  const assetSummary=assets.length?assets.map(a=>`• ${a.assetType}: ${a.name}`).join('\n'):'No assets uploaded yet';
+  const brandNotes=bf.notes||'No brand notes provided';
+
+  // Build creator bandwidth context
+  const creators=DB.getUsers().filter(u=>u.role==='creator'&&u.active!==false);
+  const allProjects=DB.getProjects();
+  const creatorBandwidth=creators.map(c=>{
+    const active=allProjects.filter(proj=>proj.assignedCreatorId===c.id&&proj.workflowStatus!=='complete').length;
+    return{name:c.name,id:c.id,active,available:active<3};
+  });
+
+  // Build available models context
+  const imgModels=IMAGE_MODELS?IMAGE_MODELS.slice(0,5).map(m=>m.n).join(', '):'FLUX 1.1 Ultra, FLUX Dev, Recraft V3';
+  const vidModels=VIDEO_MODELS?VIDEO_MODELS.slice(0,5).map(m=>m.n).join(', '):'Google Veo 3, Kling 2.1, Runway Gen-4';
+
+  // Show loading modal
+  openModal(`<div style="padding:8px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+  <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#8B5CF6,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🤖</div>
+  <div>
+    <div style="font-size:16px;font-weight:700;color:var(--t1)">${esc(pm.name)} — AI PM Briefing</div>
+    <div style="font-size:11px;color:var(--t4)">Analysing brand folder and preparing recommendations...</div>
+  </div>
+</div>
+<div id="pm-briefing-body">
+  <div style="display:flex;flex-direction:column;gap:10px;padding:20px;align-items:center">
+    <div style="font-size:24px;animation:spin 1s linear infinite">⚙️</div>
+    <div style="font-size:12px;color:var(--t3)">AI PM is reading your brand folder...</div>
+    <div style="font-size:10px;color:var(--t4);margin-top:4px" id="pm-status">Gathering brand data...</div>
+  </div>
+</div>
+</div>`);
+
+  const setStatus=s=>{const el=document.getElementById('pm-status');if(el)el.textContent=s;};
+
+  try{
+    setStatus('Reading brand folder and project brief...');
+    const prompt=`You are ${pm.name}, an expert AI Project Manager at CinexAI, specialised in ${pm.domain||'media production'}.
+
+PROJECT BRIEF:
+- Project: ${p.name}
+- Type: ${p.type}
+- Client: ${cl?.name||'Unknown'}
+- Brief: ${p.notes||'No brief provided'}
+- Priority: ${p.priority||'Medium'}
+
+CLIENT BRAND FOLDER:
+Brand Notes: ${brandNotes}
+
+Uploaded Assets:
+${assetSummary}
+
+AVAILABLE CREATORS AND BANDWIDTH:
+${creatorBandwidth.map(c=>`- ${c.name}: ${c.active} active projects, ${c.available?'AVAILABLE':'AT CAPACITY'}`).join('\n')}
+
+AVAILABLE IMAGE MODELS: ${imgModels}
+AVAILABLE VIDEO MODELS: ${vidModels}
+
+Your task: Analyse all available information and produce a comprehensive Brand Book and project recommendations.
+
+Return ONLY valid JSON in this exact structure:
+{
+  "brandBook": {
+    "brandOverview": "2-3 sentences describing the brand based on available info",
+    "visualIdentity": "Description of visual identity, colours, style based on assets and notes",
+    "toneOfVoice": "How this brand communicates — formal/casual, aspirational/practical, etc",
+    "targetAudience": "Inferred target audience based on brand and project type",
+    "competitorLandscape": "Competitor insights based on any information provided",
+    "marketPositioning": "Where this brand sits in the market",
+    "creativeApproach": "Recommended creative direction for this project type",
+    "doList": ["3-5 things the creative team should always do for this brand"],
+    "dontList": ["3-5 things to always avoid for this brand"],
+    "keyMessages": ["3-4 key messages this brand wants to communicate"]
+  },
+  "projectRecommendations": {
+    "recommendedCreatorId": "${creatorBandwidth.find(c=>c.available)?.id||creators[0]?.id||''}",
+    "recommendedCreatorName": "${creatorBandwidth.find(c=>c.available)?.name||creators[0]?.name||''}",
+    "creatorReason": "Why this creator is the best fit",
+    "imageModel": "Best image generation model for this project and why",
+    "videoModel": "Best video generation model for this project and why",
+    "estimatedShots": 8,
+    "productionNotes": "Any specific production considerations for this project"
+  },
+  "researchInsights": {
+    "marketTrends": "Current trends relevant to this brand and project type",
+    "competitorActivity": "What competitors are typically doing in this space",
+    "opportunities": "Creative opportunities to differentiate"
+  }
+}`;
+
+    setStatus('AI PM is analysing and generating Brand Book...');
+
+    const k=kC();
+    const headers=_authHeaders({'anthropic-version':'2023-06-01','content-type':'application/json'});
+    if(k)headers['x-api-key']=k;
+
+    const resp=await fetch('/api/claude',{
+      method:'POST',
+      headers,
+      body:JSON.stringify({
+        model:'claude-opus-4-20250514',
+        max_tokens:4000,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+
+    if(!resp.ok){
+      const err=await resp.json();
+      throw new Error(err.error||'API call failed');
+    }
+
+    setStatus('Processing recommendations...');
+    const data=await resp.json();
+    const raw=data.content?.[0]?.text||'';
+
+    let result;
+    try{
+      const jsonStr=raw.replace(/```json|```/g,'').trim();
+      result=JSON.parse(jsonStr);
+    }catch(e){throw new Error('Could not parse AI response. Please try again.');}
+
+    showAIPMBriefingResult(pid,pm,result);
+
+  }catch(e){
+    const body=document.getElementById('pm-briefing-body');
+    if(body)body.innerHTML=`<div style="color:var(--red);padding:20px;text-align:center;font-size:12px">
+      <div style="font-size:24px;margin-bottom:10px">⚠️</div>
+      <strong>Briefing failed</strong><br><br>${esc(e.message)}<br><br>
+      ${!kC()?'<div style="background:rgba(255,107,53,0.1);border:1px solid rgba(255,107,53,0.3);border-radius:8px;padding:12px;margin-top:12px;font-size:11px;color:var(--gold)">💡 Add your Claude API key in Settings → API Keys to enable AI PM briefings</div>':''}
+      <button class="btn btn-ghost btn-sm" style="margin-top:14px" onclick="closeModal()">Close</button>
+    </div>`;
+  }
+}
+
+function showAIPMBriefingResult(pid,pm,result){
+  const p=DB.getProject(pid);
+  const bb=result.brandBook||{};
+  const rec=result.projectRecommendations||{};
+  const ri=result.researchInsights||{};
+
+  const section=(title,content)=>`
+<div style="margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">${title}</div>
+  <div style="font-size:11px;color:var(--t2);line-height:1.7;background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:10px">${esc(content)}</div>
+</div>`;
+
+  const listSection=(title,items)=>items?.length?`
+<div style="margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">${title}</div>
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:10px">
+    ${items.map(i=>`<div style="font-size:11px;color:var(--t2);padding:3px 0;border-bottom:1px solid var(--b1);display:flex;gap:8px"><span style="color:var(--gold);flex-shrink:0">•</span>${esc(i)}</div>`).join('')}
+  </div>
+</div>`:'';
+
+  const body=document.getElementById('pm-briefing-body');
+  if(!body)return;
+
+  body.innerHTML=`
+<div style="max-height:65vh;overflow-y:auto;padding-right:4px">
+
+  <!-- TABS -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--b1);padding-bottom:10px">
+    <button onclick="pmTab('brand',this)" id="pmt-brand" class="btn btn-gold btn-sm">📘 Brand Book</button>
+    <button onclick="pmTab('project',this)" id="pmt-project" class="btn btn-ghost btn-sm">🎬 Project Recs</button>
+    <button onclick="pmTab('research',this)" id="pmt-research" class="btn btn-ghost btn-sm">🔍 Research</button>
+  </div>
+
+  <!-- BRAND BOOK TAB -->
+  <div id="pmtab-brand">
+    ${section('Brand Overview',bb.brandOverview||'—')}
+    ${section('Visual Identity',bb.visualIdentity||'—')}
+    ${section('Tone of Voice',bb.toneOfVoice||'—')}
+    ${section('Target Audience',bb.targetAudience||'—')}
+    ${section('Market Positioning',bb.marketPositioning||'—')}
+    ${section('Creative Approach for This Project',bb.creativeApproach||'—')}
+    ${listSection('✅ Always Do',bb.doList)}
+    ${listSection('❌ Always Avoid',bb.dontList)}
+    ${listSection('💬 Key Messages',bb.keyMessages)}
+  </div>
+
+  <!-- PROJECT RECS TAB (hidden) -->
+  <div id="pmtab-project" style="display:none">
+    <div style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(6,182,212,0.05));border:1px solid rgba(139,92,246,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#a78bfa;margin-bottom:8px">👤 Recommended Creator</div>
+      <div style="font-size:14px;font-weight:700;color:var(--t1);margin-bottom:4px">${esc(rec.recommendedCreatorName||'None available')}</div>
+      <div style="font-size:11px;color:var(--t3)">${esc(rec.creatorReason||'')}</div>
+      ${rec.recommendedCreatorId?`<button class="btn btn-gold btn-sm" style="margin-top:10px" onclick="approvePMCreator('${pid}','${rec.recommendedCreatorId}','${esc(rec.recommendedCreatorName||'')}')">✓ Assign This Creator</button>`:''}
+    </div>
+    ${section('🖼 Recommended Image Model',rec.imageModel||'—')}
+    ${section('🎬 Recommended Video Model',rec.videoModel||'—')}
+    ${section('📋 Production Notes',rec.productionNotes||'—')}
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;font-size:11px;color:var(--t3)">
+      Estimated shots: <strong style="color:var(--t1)">${rec.estimatedShots||8}</strong>
+    </div>
+  </div>
+
+  <!-- RESEARCH TAB (hidden) -->
+  <div id="pmtab-research" style="display:none">
+    ${section('📈 Market Trends',ri.marketTrends||'—')}
+    ${section('🏢 Competitor Activity',ri.competitorActivity||'—')}
+    ${section('💡 Creative Opportunities',ri.opportunities||'—')}
+  </div>
+
+</div>
+
+<!-- ACTIONS -->
+<div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--b1);flex-wrap:wrap">
+  <button class="btn btn-gold" onclick="generateBrandBook('${pid}',${JSON.stringify(result).replace(/'/g,"\'")})">📥 Generate Brand Book PDF</button>
+  <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+</div>`;
+
+  // Store result for later use
+  window._pmBriefingResult={pid,pm,result};
+}
+
+function pmTab(tab,btn){
+  ['brand','project','research'].forEach(t=>{
+    const el=document.getElementById('pmtab-'+t);
+    const b=document.getElementById('pmt-'+t);
+    if(el)el.style.display=t===tab?'block':'none';
+    if(b){b.className=t===tab?'btn btn-gold btn-sm':'btn btn-ghost btn-sm';}
+  });
+}
+
+function approvePMCreator(pid, creatorId, creatorName){
+  const p=DB.getProject(pid);if(!p)return;
+  p.assignedCreatorId=creatorId;
+  DB.saveProject(p);
+  toast(creatorName+' assigned to project!','ok');
+  closeModal();
+  S.detailPid=pid;
+  render();
+}
+
+async function generateBrandBook(pid, result){
+  const p=DB.getProject(pid);
+  const cl=DB.getUser(p?.clientId);
+  const pm=DB.getPM(p?.assignedPmId);
+  const bb=result?.brandBook||{};
+  const rec=result?.projectRecommendations||{};
+  const ri=result?.researchInsights||{};
+
+  toast('Generating Brand Book PDF...','info');
+
+  // Load jsPDF dynamically
+  if(!window.jspdf){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      s.onload=res;s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W=210;const H=297;const M=20;const TW=W-M*2;
+  let y=M;
+
+  const addPage=()=>{doc.addPage();y=M;};
+  const checkPage=(h=20)=>{if(y+h>H-M)addPage();};
+
+  const drawRect=(x,fy,w,h,r,fill)=>{
+    if(fill)doc.setFillColor(...fill);
+    if(r){doc.roundedRect(x,fy,w,h,r,r,fill?'F':'S');}
+    else{doc.rect(x,fy,w,h,fill?'F':'S');}
+  };
+
+  const addText=(text,x,fy,opts={})=>{
+    doc.setFont(opts.font||'helvetica',opts.style||'normal');
+    doc.setFontSize(opts.size||10);
+    doc.setTextColor(...(opts.color||[30,30,30]));
+    const lines=doc.splitTextToSize(text||'—',opts.maxW||TW);
+    doc.text(lines,x,fy,{align:opts.align||'left'});
+    return lines.length*(opts.size||10)*0.4+2;
+  };
+
+  // ─── COVER PAGE ───
+  drawRect(0,0,W,H,0,[10,10,20]);
+  drawRect(0,H-60,W,60,0,[139,92,246]);
+  doc.setFillColor(139,92,246);
+  doc.circle(W/2,H/2-20,60,'F');
+  doc.setFillColor(20,20,40);
+  doc.circle(W/2,H/2-20,55,'F');
+
+  addText('BRAND BOOK',W/2,H/2-35,{size:28,style:'bold',color:[255,255,255],align:'center'});
+  addText(cl?.name||'Client Brand',W/2,H/2-18,{size:14,color:[167,139,250],align:'center'});
+  addText(`Prepared by ${pm?.name||'AI PM'} · CinexAI`,W/2,H/2+5,{size:10,color:[100,100,140],align:'center'});
+  addText(new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}),W/2,H/2+14,{size:9,color:[80,80,120],align:'center'});
+  addText('CONFIDENTIAL — FOR INTERNAL USE ONLY',W/2,H-30,{size:8,color:[100,100,140],align:'center'});
+
+  // ─── PAGE 2: BRAND OVERVIEW ───
+  addPage();
+  doc.setFillColor(139,92,246);
+  doc.rect(M,y,TW,1,'F');
+  y+=5;
+  addText('1. BRAND OVERVIEW',M,y,{size:16,style:'bold',color:[139,92,246]});y+=10;
+
+  const sections=[
+    ['Brand Overview',bb.brandOverview],
+    ['Visual Identity',bb.visualIdentity],
+    ['Tone of Voice',bb.toneOfVoice],
+    ['Target Audience',bb.targetAudience],
+  ];
+
+  for(const [title,text] of sections){
+    checkPage(30);
+    addText(title.toUpperCase(),M,y,{size:8,style:'bold',color:[139,92,246]});y+=5;
+    const h=addText(text||'—',M,y,{size:10,color:[50,50,60]});
+    y+=h+8;
+    doc.setDrawColor(230,230,240);
+    doc.line(M,y,M+TW,y);y+=6;
+  }
+
+  // ─── PAGE 3: MARKET & POSITIONING ───
+  addPage();
+  doc.setFillColor(6,182,212);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('2. MARKET POSITIONING & RESEARCH',M,y,{size:16,style:'bold',color:[6,182,212]});y+=10;
+
+  const mSections=[
+    ['Market Positioning',bb.marketPositioning],
+    ['Competitor Landscape',bb.competitorLandscape],
+    ['Market Trends',ri.marketTrends],
+    ['Competitor Activity',ri.competitorActivity],
+    ['Creative Opportunities',ri.opportunities],
+  ];
+
+  for(const [title,text] of mSections){
+    checkPage(30);
+    addText(title.toUpperCase(),M,y,{size:8,style:'bold',color:[6,182,212]});y+=5;
+    const h=addText(text||'—',M,y,{size:10,color:[50,50,60]});
+    y+=h+8;
+    doc.setDrawColor(230,230,240);
+    doc.line(M,y,M+TW,y);y+=6;
+  }
+
+  // ─── PAGE 4: CREATIVE GUIDELINES ───
+  addPage();
+  doc.setFillColor(245,158,11);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('3. CREATIVE GUIDELINES',M,y,{size:16,style:'bold',color:[180,120,10]});y+=10;
+
+  addText('CREATIVE APPROACH',M,y,{size:8,style:'bold',color:[180,120,10]});y+=5;
+  const ch=addText(bb.creativeApproach||'—',M,y,{size:10,color:[50,50,60]});y+=ch+10;
+
+  // Do list
+  if(bb.doList?.length){
+    checkPage(20);
+    addText('✅ ALWAYS DO',M,y,{size:9,style:'bold',color:[16,185,129]});y+=6;
+    for(const item of bb.doList){
+      checkPage(10);
+      const h2=addText('• '+item,M+3,y,{size:10,color:[50,50,60]});
+      y+=h2+2;
+    }
+    y+=6;
+  }
+
+  // Don't list
+  if(bb.dontList?.length){
+    checkPage(20);
+    addText('❌ ALWAYS AVOID',M,y,{size:9,style:'bold',color:[239,68,68]});y+=6;
+    for(const item of bb.dontList){
+      checkPage(10);
+      const h2=addText('• '+item,M+3,y,{size:10,color:[50,50,60]});
+      y+=h2+2;
+    }
+    y+=6;
+  }
+
+  // Key messages
+  if(bb.keyMessages?.length){
+    checkPage(20);
+    addText('💬 KEY MESSAGES',M,y,{size:9,style:'bold',color:[139,92,246]});y+=6;
+    bb.keyMessages.forEach((msg,i)=>{
+      checkPage(14);
+      drawRect(M,y,TW,12,3,[245,243,255]);
+      addText(`${i+1}. ${msg}`,M+4,y+8,{size:10,color:[80,60,140],maxW:TW-8});
+      y+=15;
+    });
+  }
+
+  // ─── PAGE 5: PRODUCTION RECOMMENDATIONS ───
+  addPage();
+  doc.setFillColor(139,92,246);
+  doc.rect(M,y,TW,1,'F');y+=5;
+  addText('4. PRODUCTION RECOMMENDATIONS',M,y,{size:16,style:'bold',color:[139,92,246]});y+=12;
+
+  // Creator rec box
+  drawRect(M,y,TW,30,4,[245,243,255]);
+  addText('RECOMMENDED CREATOR',M+5,y+7,{size:8,style:'bold',color:[139,92,246]});
+  addText(rec.recommendedCreatorName||'TBD',M+5,y+15,{size:14,style:'bold',color:[70,50,130]});
+  addText(rec.creatorReason||'',M+5,y+22,{size:9,color:[100,80,160],maxW:TW-10});
+  y+=36;
+
+  // Models
+  const modelSections=[
+    ['IMAGE GENERATION MODEL',rec.imageModel,'#E0F2FE'],
+    ['VIDEO GENERATION MODEL',rec.videoModel,'#F0FDF4'],
+  ];
+  for(const [title,text,bg] of modelSections){
+    drawRect(M,y,TW,22,3,bg.match(/[\da-f]{2}/gi).map(v=>parseInt(v,16)));
+    addText(title,M+5,y+7,{size:8,style:'bold',color:[60,60,80]});
+    const h2=addText(text||'—',M+5,y+13,{size:10,color:[40,40,60],maxW:TW-10});
+    y+=27;
+  }
+
+  y+=4;
+  addText('PRODUCTION NOTES',M,y,{size:9,style:'bold',color:[60,60,80]});y+=6;
+  addText(rec.productionNotes||'—',M,y,{size:10,color:[50,50,60]});
+
+  // ─── FOOTER on each page ───
+  const totalPages=doc.getNumberOfPages();
+  for(let i=1;i<=totalPages;i++){
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150,150,170);
+    doc.text(`CinexAI Brand Book — ${cl?.name||'Client'} — Confidential`,M,H-8);
+    doc.text(`Page ${i} of ${totalPages}`,W-M,H-8,{align:'right'});
+  }
+
+  // Save and store in brand folder
+  const pdfBase64=doc.output('datauristring');
+  const fileName=`Brand_Book_${(cl?.name||'Brand').replace(/\s+/g,'_')}_${Date.now()}.pdf`;
+
+  // Store in brand folder
+  const u=DB.getUser(p.clientId);
+  if(u){
+    if(!u.brandAssets)u.brandAssets=[];
+    // Remove old brand books
+    u.brandAssets=u.brandAssets.filter(a=>a.assetType!=='Brand Book');
+    u.brandAssets.unshift({
+      id:gid('bb'),
+      name:fileName,
+      type:'application/pdf',
+      preview:null,
+      pdfData:pdfBase64,
+      assetType:'Brand Book',
+      generatedBy:pm?.name||'AI PM',
+      uploadedAt:new Date().toISOString(),
+      persisted:false
+    });
+    DB.saveUser(u);
+  }
+
+  // Download
+  doc.save(fileName);
+  toast('Brand Book PDF generated and saved to Brand Folder!','ok');
+  closeModal();
+}
+
 // ── BRAND FOLDER ──
 function triggerBFUpload(type){
   window._bfUploadType=type;
