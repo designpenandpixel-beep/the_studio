@@ -1391,7 +1391,13 @@ ${wf==='storyboard_review'&&p.pendingFeedback?`<button class="btn btn-red btn-sm
 <button class="btn btn-ghost btn-sm" onclick="showEditProjModal('${p.id}')">✏ Edit Details</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">👤 Assign</button>
 ${p.assignedPmId?`<button class="btn btn-outline btn-sm" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(6,182,212,0.08));border-color:rgba(139,92,246,0.4);color:#a78bfa" onclick="runAIPMBriefing('${p.id}')">🤖 Run AI PM Briefing</button>`:'<button class="btn btn-ghost btn-sm" style="grid-column:1/-1;opacity:0.5;font-size:10px" onclick="showAssignModal('${p.id}')">Assign an AI PM to run briefing</button>'}
-${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:'<span class="badge badge-green" style="grid-column:1/-1;text-align:center;padding:6px">✓✓ Project Complete</span>'}
+${wf!=='complete'?`<button class="btn btn-green btn-sm" style="grid-column:1/-1" onclick="markProjComplete('${p.id}')">✓ Mark Complete</button>`:`
+<div style="grid-column:1/-1">
+  <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+    <span style="font-size:11px;color:#10B981;font-weight:600">✓✓ Project Complete · ${(p.deliveryFiles||[]).length} file(s) delivered</span>
+    <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="addDeliveryFiles('${p.id}')">+ Add Files</button>
+  </div>
+</div>`}
 </div>
 </div>
 
@@ -1460,7 +1466,83 @@ function markProjComplete(pid){
   p.workflowStatus='complete';
   DB.saveProject(p);render();toast('Project marked complete!','ok');
   pushToRole('admin','complete','Project complete',p.name+' has been marked complete',p.id);
-  if(p.clientId)pushNotif(p.clientId,'complete','Project complete!',p.name+' has been finalised.',p.id);
+  if(p.clientId)pushNotif(p.clientId,'complete','Project complete!',p.name+' has been finalised and is ready for download.',p.id);
+  // Prompt to upload delivery files
+  setTimeout(()=>showDeliveryUploadModal(pid),300);
+}
+
+function showDeliveryUploadModal(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  openModal(`
+<div style="padding:4px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+  <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#10B981,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📦</div>
+  <div>
+    <div style="font-size:15px;font-weight:700;color:var(--t1)">Upload Final Deliverables</div>
+    <div style="font-size:11px;color:var(--t4)">${esc(p.name)} — upload files for the client to download</div>
+  </div>
+</div>
+<div class="ib ib-blue" style="margin-bottom:14px;font-size:11px">Files uploaded here will appear in the client's portal under "Final Deliverables" — they can download them directly.</div>
+<div style="border:2px dashed var(--b2);border-radius:10px;padding:24px;text-align:center;margin-bottom:14px;cursor:pointer;transition:all 0.2s" onclick="document.getElementById('del-upload').click()" id="del-drop-zone">
+  <div style="font-size:28px;margin-bottom:8px">📁</div>
+  <div style="font-size:12px;font-weight:600;color:var(--t2)">Click to upload files</div>
+  <div style="font-size:10px;color:var(--t4);margin-top:4px">MP4, MOV, PNG, JPG, PDF, ZIP — any format</div>
+</div>
+<input type="file" id="del-upload" multiple style="display:none" onchange="uploadDeliveryFiles(event,'${pid}')"/>
+<div id="del-file-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:160px;overflow-y:auto"></div>
+<div class="btn-row" style="margin-top:0">
+  <button class="btn btn-gold" onclick="closeModal();S.detailPid='${pid}';render()">Done</button>
+  <button class="btn btn-ghost" onclick="closeModal();S.detailPid='${pid}';render()">Skip for now</button>
+</div>
+</div>`);
+}
+
+async function uploadDeliveryFiles(e, pid){
+  const p=DB.getProject(pid);if(!p)return;
+  if(!p.deliveryFiles)p.deliveryFiles=[];
+  const listEl=document.getElementById('del-file-list');
+
+  for(const f of Array.from(e.target.files)){
+    const itemId='df_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+    // Show uploading state
+    if(listEl){
+      const div=document.createElement('div');
+      div.id=itemId;
+      div.style.cssText='display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--b1);border-radius:7px;padding:10px;font-size:11px';
+      div.innerHTML=`<span style="font-size:16px">${f.type.startsWith('video/')?'🎬':f.type.startsWith('image/')?'🖼':'📄'}</span><div style="flex:1"><div style="color:var(--t1);font-weight:600">${esc(f.name)}</div><div style="color:var(--t4);font-size:9px">${(f.size/1024/1024).toFixed(1)} MB · Uploading...</div></div><div style="width:14px;height:14px;border:2px solid var(--gold);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>`;
+      listEl.appendChild(div);
+    }
+
+    const r=new FileReader();
+    await new Promise(res=>{
+      r.onload=async ev=>{
+        const b64=ev.target.result;
+        const isImg=f.type.startsWith('image/');
+        let fileUrl=b64; // fallback to base64
+        // Try to upload image to Supabase for permanent URL
+        if(isImg){
+          try{
+            const pUrl=await persistImage(b64);
+            fileUrl=pUrl;
+          }catch(e){}
+        }
+        const df={id:gid('df'),name:f.name,type:f.type,size:f.size,url:fileUrl,uploadedAt:new Date().toISOString(),uploadedBy:S.session?.name||'Admin'};
+        p.deliveryFiles.push(df);
+        DB.saveProject(p);
+        // Update list item
+        const itemEl=document.getElementById(itemId);
+        if(itemEl) itemEl.innerHTML=`<span style="font-size:16px">${f.type.startsWith('video/')?'🎬':f.type.startsWith('image/')?'🖼':'📄'}</span><div style="flex:1"><div style="color:var(--t1);font-weight:600">${esc(f.name)}</div><div style="color:var(--t4);font-size:9px">${(f.size/1024/1024).toFixed(1)} MB · <span style="color:var(--green)">✓ Ready</span></div></div>`;
+        res();
+      };
+      r.readAsDataURL(f);
+    });
+  }
+  toast(e.target.files.length+' file(s) ready for delivery!','ok');
+}
+
+function addDeliveryFiles(pid){
+  const p=DB.getProject(pid);if(!p)return;
+  showDeliveryUploadModal(pid);
 }
 
 function adminClients(){
@@ -4257,7 +4339,30 @@ ${!readyShots.length?'<div style="color:var(--t4);font-size:10px;padding:12px;gr
 </div></div>`;
   }
 
-  if(wf==='complete')html+=`<div class="ib ib-green" style="margin-top:12px"><strong>Project Complete!</strong> Your production has been finalised. Contact your account manager to receive final deliverables.</div>`;
+  if(wf==='complete'){
+    const deliveryFiles=p.deliveryFiles||[];
+    html+=`<div style="margin-top:16px;background:linear-gradient(135deg,rgba(16,185,129,0.08),rgba(6,182,212,0.04));border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:18px;">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+  <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#10B981,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🎉</div>
+  <div>
+    <div style="font-size:14px;font-weight:700;color:#10B981">Project Complete!</div>
+    <div style="font-size:11px;color:var(--t4)">Your final deliverables are ready to download below.</div>
+  </div>
+</div>
+${deliveryFiles.length?`
+<div style="font-size:10px;font-weight:700;color:var(--t4);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">📦 Final Deliverables (${deliveryFiles.length} file${deliveryFiles.length>1?'s':''})</div>
+<div style="display:flex;flex-direction:column;gap:8px;">
+${deliveryFiles.map(df=>`<div style="display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:12px;">
+  <span style="font-size:22px;flex-shrink:0">${df.type?.startsWith('video/')?'🎬':df.type?.startsWith('image/')?'🖼️':df.name?.endsWith('.pdf')?'📄':'📁'}</span>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:12px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(df.name)}</div>
+    <div style="font-size:9px;color:var(--t4);margin-top:2px">${df.size?(df.size/1024/1024).toFixed(1)+' MB · ':''} Uploaded ${df.uploadedAt?new Date(df.uploadedAt).toLocaleDateString():''}</div>
+  </div>
+  <a href="${df.url}" download="${esc(df.name)}" class="btn btn-green btn-sm" style="flex-shrink:0;text-decoration:none">⬇ Download</a>
+</div>`).join('')}
+</div>`:`<div style="text-align:center;padding:16px;border:1px dashed rgba(16,185,129,0.3);border-radius:8px;font-size:11px;color:var(--t4)">Files are being prepared — you'll be notified when they're ready to download.</div>`}
+</div>`;
+  }
   return html;
 }
 
