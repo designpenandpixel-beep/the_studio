@@ -647,16 +647,7 @@ function render(){
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
   app.innerHTML=appBarHTML()+mainHTML();
-  if(S.session?._impersonating){
-    const bar=document.createElement('div');
-    bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#FF6B35;color:#fff;font-size:12px;font-weight:700;padding:7px 20px;display:flex;align-items:center;justify-content:space-between;letter-spacing:0.04em;box-shadow:0 2px 12px rgba(255,107,53,0.4);';
-    bar.innerHTML=`<span>👁 ADMIN VIEW — Viewing as ${S.session.name} (${S.session.role})</span><button onclick="returnToAdmin()" style="background:rgba(0,0,0,0.25);border:none;color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:6px;cursor:pointer;font-family:inherit;letter-spacing:0.04em;">← Return to Admin</button>`;
-    document.body.appendChild(bar);
-    document.body.style.paddingTop='36px';
-  } else {
-    document.querySelectorAll('[data-admin-bar]').forEach(el=>el.remove());
-    document.body.style.paddingTop='';
-  }
+
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -839,7 +830,8 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
   <div id="notif-badge" class="notif-count" style="display:none"></div>
 </button>
 </div>
-<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
+${S.session?._impersonating?'<button class="btn btn-ghost btn-sm" onclick="returnToAdmin()" style="border-color:var(--gold);color:var(--gold)">← Admin</button>':\'\'}
+${S.session?._impersonating?`<button class="btn btn-gold btn-sm" onclick="returnToAdmin()">← Return to Admin</button>`:''}<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
 </div>
 <div id="notif-panel" style="display:none;position:fixed;top:46px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:9px;z-index:300;overflow:hidden;box-shadow:0 8px 24px #000a">
