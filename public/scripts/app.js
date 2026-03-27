@@ -2487,10 +2487,15 @@ function clientPMPage(){
   const assignedPm=user?.assignedPmId?DB.getPM(user.assignedPmId):null;
   // Clear stale PM reference
   if(user?.assignedPmId&&!assignedPm){user.assignedPmId=null;DB.saveUser(user);}
-  const allPms=DB.getPMs().sort((a,b)=>(b.avgRating||0)-(a.avgRating||0));
-  if(S.pmView==='directory') return clientPMDirectory(allPms);
+  // Client only ever sees their dedicated PM — no directory browsing
   if(assignedPm) return clientPMChatFull(assignedPm,user);
-  return clientPMDirectory(allPms);
+  // No PM assigned yet — show waiting state
+  return`<div class="page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center">
+    <div style="font-size:48px;margin-bottom:16px">🤖</div>
+    <div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h);margin-bottom:8px">No AI PM Assigned Yet</div>
+    <div style="font-size:12px;color:var(--t4);max-width:340px;line-height:1.7;margin-bottom:20px">Your dedicated AI Project Manager will be assigned by your CinexAI account manager. They'll be tailored to your brand and domain.</div>
+    <div style="background:rgba(196,157,58,0.08);border:1px solid rgba(196,157,58,0.2);border-radius:10px;padding:14px 20px;font-size:11px;color:var(--t3)">💬 Contact your account manager to get your PM assigned</div>
+  </div>`;
 }
 
 function clientPMProfile(pm,user){
@@ -2779,7 +2784,7 @@ function clientPMChatFull(pm, user){
       <div style="display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--b1)">
         <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="changePMConfirm('${user.id}')">↔ Change PM</button>
         <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="viewPMMemory('${pm.id}','${user.id}')">🧠 PM Memory</button>
-        <button class="btn btn-gold btn-sm" style="font-size:9px" onclick="openTrainPMModal('${pm.id}','${user.id}')">📚 Train My PM</button>
+        <button class="btn btn-gold btn-sm" style="font-size:9px" onclick="openImprovePMModal('${pm.id}','${user.id}')">✦ Improve My PM</button>
       </div>
     </div>
 
@@ -2910,6 +2915,149 @@ function saveTrainPM(pmId, clientId){
   DB.savePMMemory(pmId,clientId,mem);
   closeModal();toast('PM memory updated ✦','ok');render();
 }
+
+// ── IMPROVE MY PM — Rich knowledge input ───────────────────────────────────
+function openImprovePMModal(pmId, clientId){
+  const pm=DB.getPM(pmId);
+  const mem=DB.getPMMemory(pmId,clientId);
+  const uploadedCount=(mem.uploadedSkills||[]).length;
+  openModal(`
+    <div class="modal-title">✦ Improve ${esc(pm?.name||'Your PM')}</div>
+    <div style="font-size:11px;color:var(--t4);margin-bottom:16px">Share brand knowledge, market updates, competitor insights, or any context. Your PM learns from everything you share.</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="background:rgba(196,157,58,0.06);border:1px solid rgba(196,157,58,0.15);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;margin-bottom:4px">🧠</div>
+        <div style="font-size:10px;font-weight:700;color:var(--gold)">${mem.learnings?.length||0} Learnings</div>
+        <div style="font-size:9px;color:var(--t4)">recorded so far</div>
+      </div>
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.15);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;margin-bottom:4px">📄</div>
+        <div style="font-size:10px;font-weight:700;color:var(--green)">${uploadedCount} Files</div>
+        <div style="font-size:9px;color:var(--t4)">uploaded</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px">
+
+      <!-- Free text knowledge -->
+      <div class="fg">
+        <label>Share Knowledge <span style="font-size:9px;font-weight:400;color:var(--t4)">Brand updates, market insights, tone changes, news…</span></label>
+        <textarea id="improve-text" rows="4" placeholder="e.g. We just launched a new product line targeting Gen Z. Our tone should be more playful and less corporate. Our main competitor Nykaa just ran a campaign around sustainability — we should differentiate by focusing on science-backed formulations..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box"></textarea>
+      </div>
+
+      <!-- Reference Links -->
+      <div class="fg">
+        <label>Reference Links <span style="font-size:9px;font-weight:400;color:var(--t4)">Articles, competitor pages, campaigns, trends</span></label>
+        <textarea id="improve-links" rows="2" placeholder="https://competitor.com/campaign" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box;font-family:monospace"></textarea>
+        <div style="font-size:9px;color:var(--t4);margin-top:3px">One URL per line. Your PM will reference these for context.</div>
+      </div>
+
+      <!-- Doc / File Upload -->
+      <div>
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:5px">UPLOAD DOCUMENT</label>
+        <div onclick="document.getElementById('improve-file').click()" id="improve-drop" style="border:2px dashed var(--b2);border-radius:8px;padding:14px;text-align:center;cursor:pointer;transition:border-color 0.2s" onmouseenter="this.style.borderColor='var(--gold)'" onmouseleave="this.style.borderColor='var(--b2)'">
+          <div id="improve-file-label">
+            <span style="font-size:18px">📄</span>
+            <div style="font-size:11px;color:var(--t3);font-weight:600;margin-top:4px">Click to upload .txt, .md, .pdf or .docx</div>
+            <div style="font-size:9px;color:var(--t4);margin-top:2px">Brand guidelines, competitor reports, trend docs, scripts</div>
+          </div>
+        </div>
+        <input type="file" id="improve-file" accept=".txt,.md,.pdf,.doc,.docx" style="display:none" onchange="previewImproveFile(this)">
+        <div id="improve-file-status" style="font-size:10px;color:var(--t3);margin-top:5px;display:none"></div>
+      </div>
+
+      <!-- Quick tags -->
+      <div>
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:5px">WHAT TYPE OF UPDATE IS THIS?</label>
+        <div style="display:flex;flex-wrap:wrap;gap:5px" id="improve-tags">
+          ${['Brand Voice','Visual Style','Target Audience','Competitor Intel','Market Trend','Product Update','Campaign Reference','Tone Change'].map(t=>`<button type="button" onclick="toggleImproveTag(this)" style="padding:4px 10px;border-radius:5px;font-size:9px;font-weight:600;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t3);font-family:inherit;transition:all 0.15s">${t}</button>`).join('')}
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-gold" style="flex:1" onclick="saveImprovePM('${pmId}','${clientId}')">✦ Update PM Knowledge</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+
+function toggleImproveTag(btn){
+  const active=btn.style.background!=='transparent'&&btn.style.background!=='';
+  btn.style.background=active?'transparent':'rgba(196,157,58,0.15)';
+  btn.style.borderColor=active?'var(--b2)':'var(--gold)';
+  btn.style.color=active?'var(--t3)':'var(--gold)';
+}
+
+function previewImproveFile(input){
+  const file=input.files[0];if(!file)return;
+  const label=document.getElementById('improve-file-label');
+  const status=document.getElementById('improve-file-status');
+  if(label)label.innerHTML=`<span style="font-size:18px">📎</span><div style="font-size:11px;color:var(--green);font-weight:600;margin-top:4px">${esc(file.name)}</div><div style="font-size:9px;color:var(--t4)">${Math.round(file.size/1024)}KB · Click to change</div>`;
+  if(status){status.style.display='block';status.textContent='File ready to upload';}
+}
+
+async function saveImprovePM(pmId, clientId){
+  const text=document.getElementById('improve-text')?.value?.trim();
+  const links=document.getElementById('improve-links')?.value?.trim();
+  const fileInput=document.getElementById('improve-file');
+  const file=fileInput?.files?.[0];
+  const tags=[...document.querySelectorAll('#improve-tags button')].filter(b=>b.style.background&&b.style.background!=='transparent').map(b=>b.textContent);
+
+  if(!text&&!links&&!file){toast('Please add some knowledge first','err');return;}
+
+  const mem=DB.getPMMemory(pmId,clientId);
+  if(!mem.learnings)mem.learnings=[];
+  if(!mem.uploadedSkills)mem.uploadedSkills=[];
+
+  const btn=document.querySelector('.btn-gold');
+  if(btn){btn.textContent='Saving…';btn.disabled=true;}
+
+  try{
+    // Process text knowledge
+    if(text){
+      const tagLabel=tags.length?'['+tags.join(', ')+'] ':'';
+      mem.learnings.push(tagLabel+text.substring(0,500));
+      // Update specific memory fields based on tags
+      if(tags.includes('Brand Voice'))mem.brandVoice=text.substring(0,300);
+      if(tags.includes('Target Audience'))mem.targetAudience=text.substring(0,300);
+      if(tags.includes('Visual Style'))mem.visualStyle=text.substring(0,300);
+    }
+
+    // Process links
+    if(links){
+      const urls=links.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('http'));
+      if(urls.length)mem.learnings.push('[Reference Links] '+urls.join(' | '));
+      if(!mem.referenceLinks)mem.referenceLinks=[];
+      mem.referenceLinks.push(...urls);
+    }
+
+    // Process file
+    if(file){
+      const fileText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file);});
+      const tagLabel=tags.length?'['+tags.join(', ')+'] ':'';
+      try{
+        const summary=await callClaude('Extract key brand/market knowledge from this document. Be concise.','File: "'+file.name+'"\n\n'+fileText.substring(0,4000),400);
+        mem.uploadedSkills.push({name:file.name,summary,tags,addedAt:new Date().toISOString()});
+        mem.learnings.push(tagLabel+'[From '+file.name+'] '+summary.substring(0,300));
+      }catch(e){
+        mem.uploadedSkills.push({name:file.name,summary:fileText.substring(0,300),tags,addedAt:new Date().toISOString()});
+        mem.learnings.push(tagLabel+'[From '+file.name+'] '+fileText.substring(0,200));
+      }
+    }
+
+    DB.savePMMemory(pmId,clientId,mem);
+    closeModal();
+    toast('✦ PM knowledge updated — your PM is now smarter!','ok');
+    render();
+  }catch(e){
+    toast('Error saving: '+e.message,'err');
+    if(btn){btn.textContent='✦ Update PM Knowledge';btn.disabled=false;}
+  }
+}
+
 
 // ── ADMIN PM CHAT VIEW ─────────────────────────────────────────
 function adminViewClientChat(clientId){
