@@ -1569,21 +1569,30 @@ function adminClients(){
 <button class="btn btn-gold" onclick="showRegModal('client')">+ Register Client</button>
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Client</th><th>Client ID</th><th>Password</th><th>Projects</th><th>AI PM</th><th>Status</th><th>Actions</th></tr></thead>
+<table class="tbl" style="table-layout:fixed;width:100%"><thead><tr>
+<th style="width:22%">Client</th>
+<th style="width:10%">Client ID</th>
+<th style="width:11%">Password</th>
+<th style="width:8%">Projects</th>
+<th style="width:16%">AI PM</th>
+<th style="width:8%">Status</th>
+<th style="width:25%">Actions</th>
+</tr></thead>
 <tbody>${clients.length?clients.map(c=>{
   const pcount=DB.getProjects().filter(p=>p.clientId===c.id).length;
   const emp=emps.find(e=>e.assignedClients?.includes(c.id));
   return`<tr>
-<td><div class="urow">${clientAvatar(c,36,8)}<div class="uinfo"><div class="name">${esc(c.name)}</div><div class="sub">${esc(c.email||'')}</div></div></div></td>
+<td style="overflow:hidden"><div class="urow" style="min-width:0">${clientAvatar(c,36,8)}<div class="uinfo" style="min-width:0;overflow:hidden"><div class="name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}</div><div class="sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.email||'')}</div></div></div></td>
 <td><code style="color:var(--purple);font-size:10px">${c.clientId||'—'}</code></td>
 <td><div style="display:flex;align-items:center;gap:4px"><code class="pw-masked" style="color:var(--t4);font-size:10px" data-pw="${esc(c.password)}">••••••••</code><button onclick="togglePwVis(this)" style="background:none;border:none;cursor:pointer;font-size:11px;padding:2px">👁</button></div></td>
 <td><span style="font-size:10px;color:var(--t3)">${pcount}</span></td>
 <td><span style="font-size:10px;color:${c.assignedPmId?'var(--gold)':'var(--t4)'}">${c.assignedPmId?esc(DB.getPM(c.assignedPmId)?.name||'Unknown PM'):'— No PM'}</span></td>
 <td><span class="badge badge-${c.active!==false?'green':'red'}">${c.active!==false?'Active':'Inactive'}</span></td>
-<td><div style="display:flex;gap:4px">
-<button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${c.id}')">Edit</button>
-<button class="btn btn-blue btn-sm" onclick="viewAsClient('${c.id}')">View Portal</button><button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="adminViewClientChat('${c.id}')">💬 Chat</button>
-<button class="btn btn-${c.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${c.id}')">${c.active!==false?'Deactivate':'Activate'}</button>
+<td><div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+<button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="showEditUserModal('${c.id}')">Edit</button>
+<button class="btn btn-blue btn-sm" style="font-size:9px" onclick="viewAsClient('${c.id}')">View Portal</button>
+<button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="adminViewClientChat('${c.id}')">💬 Chat</button>
+<button class="btn btn-${c.active!==false?'red':'green'} btn-sm" style="font-size:9px" onclick="toggleActive('${c.id}')">${c.active!==false?'Deactivate':'Activate'}</button>
 </div></td></tr>`;}).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:20px">No clients yet</td></tr>'}</tbody></table>
 </div></div>`;
 }
