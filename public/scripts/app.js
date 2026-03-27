@@ -647,6 +647,16 @@ function render(){
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
   app.innerHTML=appBarHTML()+mainHTML();
+  if(S.session?._impersonating){
+    const bar=document.createElement('div');
+    bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#FF6B35;color:#fff;font-size:12px;font-weight:700;padding:7px 20px;display:flex;align-items:center;justify-content:space-between;letter-spacing:0.04em;box-shadow:0 2px 12px rgba(255,107,53,0.4);';
+    bar.innerHTML=`<span>👁 ADMIN VIEW — Viewing as ${S.session.name} (${S.session.role})</span><button onclick="returnToAdmin()" style="background:rgba(0,0,0,0.25);border:none;color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:6px;cursor:pointer;font-family:inherit;letter-spacing:0.04em;">← Return to Admin</button>`;
+    document.body.appendChild(bar);
+    document.body.style.paddingTop='36px';
+  } else {
+    document.querySelectorAll('[data-admin-bar]').forEach(el=>el.remove());
+    document.body.style.paddingTop='';
+  }
   document.getElementById('st-r').textContent=(S.session?.name||'')+'  ('+S.session?.role+')';
   VEO_RULES.forEach(r=>{if(S.rules[r.id]===undefined)S.rules[r.id]=true});
   setTimeout(updateNotifBadge,50);
@@ -805,7 +815,7 @@ function appBarHTML(){
   const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
   const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Assets'}];
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
-  const roleLabel=r==='admin'?'Admin':r==='creator'?'Creator':'Client';
+  const roleLabel=r==='admin'?'Admin':r==='creator'?'AI PM':'Client';
   return`<div class="app-bar">
 <div class="logo"><img src="/Logo.svg" alt="CinexAI" style="height:34px;width:auto"></div>
 <div id="sb-dot" class="sb-status-dot" title="Supabase: unconfigured" onclick="goTab('settings')"></div>
@@ -891,7 +901,7 @@ function adminDashboard(){
   const df=S.dashF||{q:'',creator:'',client:'',type:'',status:'',from:'',to:''};
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -948,7 +958,7 @@ ${(()=>{
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
 <input type="text" placeholder="Project name..." value="${esc(df.q)}" oninput="S.dashF={...S.dashF||{},q:this.value};debounceRender('dash')" style="width:100%;background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px"/></div>
-<div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Creator</div>
+<div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">AI PM</div>
 <select onchange="S.dashF={...S.dashF||{},creator:this.value};render()" style="background:var(--bg4);border:1px solid var(--b2);color:var(--t1);padding:5px 8px;border-radius:4px;font-size:10px">
 <option value="">All Creators</option>${creators.map(c=>`<option value="${c.id}"${df.creator===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
 <div><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Client</div>
@@ -971,7 +981,7 @@ ${(()=>{
 <div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="exportDashboardCSV()">Export CSV</button></div>
 </div>
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Project</th><th>Project ID</th><th>Client</th><th>Type</th><th>Workflow</th><th>Creator</th><th>Created</th><th>Actions</th></tr></thead>
+<table class="tbl"><thead><tr><th>Project</th><th>Project ID</th><th>Client</th><th>Type</th><th>Workflow</th><th>AI PM</th><th>Created</th><th>Actions</th></tr></thead>
 <tbody>${flt.length?flt.map(p=>adminProjRow(p)).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--t4);padding:24px">No projects match filters</td></tr>'}</tbody></table>
 </div></div>`;
 }
@@ -980,7 +990,7 @@ function exportDashboardCSV(){
   const df=S.dashF||{};const ps=DB.getProjects();
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -988,8 +998,8 @@ function exportDashboardCSV(){
     if(df.to&&p.createdAt&&new Date(p.createdAt)>new Date(df.to+'T23:59:59'))return false;
     return true;
   });
-  const rows=[['Project','Client','Client ID','Type','Workflow','Creator','Created','Updated']];
-  flt.forEach(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);rows.push([p.name,cl?.name||'',cl?.clientId||'',MT[p.type]?.label||p.type,p.workflowStatus||'',cr?.name||'',p.createdAt?new Date(p.createdAt).toLocaleDateString():'',p.updatedAt?new Date(p.updatedAt).toLocaleDateString():'']);});
+  const rows=[['Project','Client','Client ID','Type','Workflow','AI PM','Created','Updated']];
+  flt.forEach(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);rows.push([p.name,cl?.name||'',cl?.clientId||'',MT[p.type]?.label||p.type,p.workflowStatus||'',cr?.name||'',p.createdAt?new Date(p.createdAt).toLocaleDateString():'',p.updatedAt?new Date(p.updatedAt).toLocaleDateString():'']);});
   const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
   dlTxt(csv,'studio_dashboard_'+new Date().toISOString().slice(0,10)+'.csv');
 }
@@ -998,7 +1008,7 @@ function syncToSheets(){
   const u=DB.getUser(S.session?.userId);const url=u?.sheetsUrl;
   if(!url){toast('Set Google Sheets URL in Settings first','err');goTab('settings');return;}
   const ps=DB.getProjects();const us=DB.getUsers();
-  const payload={projects:ps.map(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);return{id:p.id,name:p.name,type:MT[p.type]?.label||p.type,client:cl?.name||'',clientId:cl?.clientId||'',creator:cr?.name||'',status:p.workflowStatus||'',synopsisRevisions:p.synopsisRevisionCount||0,synopsisLocked:p.synopsisLocked||false,storyboardReleased:p.storyboardReleased||false,createdAt:p.createdAt,updatedAt:p.updatedAt};}),clients:us.filter(u=>u.role==='client').map(u=>({id:u.clientId,name:u.name,email:u.email||'',projects:ps.filter(p=>p.clientId===u.id).length,active:u.active!==false})),creators:us.filter(u=>u.role==='creator').map(u=>({name:u.name,username:u.username||'',clients:(u.assignedClients||[]).length,active:u.active!==false})),syncedAt:new Date().toISOString()};
+  const payload={projects:ps.map(p=>{const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);return{id:p.id,name:p.name,type:MT[p.type]?.label||p.type,client:cl?.name||'',clientId:cl?.clientId||'',aiPm:cr?.name||'',status:p.workflowStatus||'',synopsisRevisions:p.synopsisRevisionCount||0,synopsisLocked:p.synopsisLocked||false,storyboardReleased:p.storyboardReleased||false,createdAt:p.createdAt,updatedAt:p.updatedAt};}),clients:us.filter(u=>u.role==='client').map(u=>({id:u.clientId,name:u.name,email:u.email||'',projects:ps.filter(p=>p.clientId===u.id).length,active:u.active!==false})),creators:us.filter(u=>u.role==='creator').map(u=>({name:u.name,username:u.username||'',clients:(u.assignedClients||[]).length,active:u.active!==false})),syncedAt:new Date().toISOString()};
   // Route through Supabase Edge Function proxy to avoid CORS issues
   // Use SB object directly (already loaded in memory) — more reliable than localStorage
   const sbUrl=SB._url||localStorage.getItem('sb_url')||'';
@@ -1053,7 +1063,7 @@ function adminProjects(){
   const viewMode=S.projView||'kanban'; // kanban | table | cards
   let flt=ps.filter(p=>{
     if(df.q&&!p.name.toLowerCase().includes(df.q.toLowerCase())&&!(p.projectId||'').includes(df.q)&&!(DB.getUser(p.clientId)?.name||'').toLowerCase().includes(df.q.toLowerCase()))return false;
-    if(df.creator&&p.assignedCreatorId!==df.creator)return false;
+    if(df.creator&&p.assignedPmId!==df.creator)return false;
     if(df.client&&p.clientId!==df.client)return false;
     if(df.type&&p.type!==df.type)return false;
     if(df.status&&p.workflowStatus!==df.status)return false;
@@ -1167,7 +1177,7 @@ onmouseout="this.style.borderColor='var(--b2)';this.style.color='var(--t4)'">+ A
 }
 
 function kanbanCard(p){
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const now=new Date();const isOverdue=p.deadline&&new Date(p.deadline)<now&&p.workflowStatus!=='complete';
   const isAtRisk=p.deadline&&!isOverdue&&new Date(p.deadline)<new Date(Date.now()+7*864e5);
   const priColors={high:'var(--red)',medium:'#FF6B35',low:'#3a3a3a'};
@@ -1226,7 +1236,7 @@ function projCards(projects){
   if(!projects.length)return`<div style="text-align:center;color:var(--t4);padding:40px">No projects match filters.</div>`;
   return`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:11px">
 ${projects.map(p=>{
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const wf=p.workflowStatus||'new';const now=new Date();
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
@@ -1263,9 +1273,9 @@ ${(p.comments||[]).length?`<span style="font-size:9px;color:var(--blue)">💬${p
 function projTable(projects){
   if(!projects.length)return`<div style="text-align:center;color:var(--t4);padding:40px">No projects match filters.</div>`;
   return`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;overflow:hidden">
-<table class="tbl"><thead><tr><th>Project</th><th>ID</th><th>Client</th><th>Creator</th><th>Status</th><th>Priority</th><th>Deadline</th><th>Updated</th><th></th></tr></thead>
+<table class="tbl"><thead><tr><th>Project</th><th>ID</th><th>Client</th><th>AI PM</th><th>Status</th><th>Priority</th><th>Deadline</th><th>Updated</th><th></th></tr></thead>
 <tbody>${projects.map(p=>{
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const wf=p.workflowStatus||'new';const now=new Date();
   const isOverdue=p.deadline&&new Date(p.deadline)<now&&wf!=='complete';
   const alert=p.pendingFeedback||p.newBrief;
@@ -1293,7 +1303,7 @@ ${(p.comments||[]).length?`<div style="font-size:8px;color:var(--blue)">💬${p.
 
 // ── Project Detail Page (inline, replaces old modal) ──
 function projDetailPage(p){
-  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+  const mt=MT[p.type];const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
   const creators=DB.getUsers().filter(u=>u.role==='creator');
   const clients=DB.getUsers().filter(u=>u.role==='client');
   const wf=p.workflowStatus||'new';const now=new Date();
@@ -1348,7 +1358,7 @@ ${wfMiniDots(p)}
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:13px;font-size:10px;line-height:2.1;color:var(--t3)">
 <div style="display:flex;justify-content:space-between"><span><strong style="color:var(--t4)">Type</strong></span><span>${mt?.icon} ${mt?.label||p.type}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Client</strong></span><span style="color:var(--t2)">${cl?esc(cl.name)+' · '+cl.clientId:'Not assigned'}</span></div>
-<div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Creator</strong></span><span style="color:var(--blue)">${cr?esc(cr.name):'Unassigned'}</span></div>
+<div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">AI PM</strong></span><span style="color:var(--blue)">${cr?esc(cr.name):'Unassigned'}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Created</strong></span><span>${p.createdAt?new Date(p.createdAt).toLocaleDateString():''}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Last Updated</strong></span><span>${p.updatedAt?new Date(p.updatedAt).toLocaleDateString():''}</span></div>
 <div style="display:flex;justify-content:space-between;border-top:1px solid var(--b1);padding-top:4px"><span><strong style="color:var(--t4)">Comments</strong></span><span style="color:var(--blue)">${(p.comments||[]).length}</span></div>
@@ -1425,7 +1435,7 @@ function showEditProjModal(pid){
 <div class="fg"><label>Deadline</label><input type="date" id="ep-dl" value="${p.deadline||''}"/></div>
 <div class="fg"><label>Tags</label><input type="text" id="ep-tags" value="${esc((p.tags||[]).join(', '))}"/></div>
 <div class="fg"><label>Client</label><select id="ep-cl"><option value="">None</option>${clients.map(c=>`<option value="${c.id}"${p.clientId===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
-<div class="fg"><label>Creator</label><select id="ep-cr"><option value="">None</option>${creators.map(c=>`<option value="${c.id}"${p.assignedCreatorId===c.id?' selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>AI PM</label><select id="ep-cr"><option value="">None</option>${DB.getPMs().map(pm=>`<option value="${pm.id}"${p.assignedPmId===pm.id?' selected':''}}>${esc(pm.name)}</option>`).join('')}</select></div>
 </div>
 <div class="fg full"><label>Notes</label><textarea id="ep-notes" rows="2">${esc(p.notes||'')}</textarea></div>
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditProj('${pid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
@@ -1437,7 +1447,7 @@ function doEditProj(pid){
   p.deadline=document.getElementById('ep-dl')?.value||null;
   p.tags=(document.getElementById('ep-tags')?.value||'').split(',').map(t=>t.trim()).filter(Boolean);
   p.clientId=document.getElementById('ep-cl')?.value||null;
-  p.assignedCreatorId=document.getElementById('ep-cr')?.value||null;
+  p.assignedPmId=document.getElementById('ep-cr')?.value||null;
   p.notes=document.getElementById('ep-notes')?.value.trim()||'';
   DB.saveProject(p);closeModal();render();toast('Project updated!','ok');
 }
@@ -1914,7 +1924,7 @@ function adminTimeline(){
   const creators=DB.getUsers().filter(u=>u.role==='creator');
   let filtered=ps.filter(p=>{
     if(gf.q&&!p.name.toLowerCase().includes(gf.q.toLowerCase()))return false;
-    if(gf.creator&&p.assignedCreatorId!==gf.creator)return false;
+    if(gf.creator&&p.assignedPmId!==gf.creator)return false;
     if(gf.status&&p.workflowStatus!==gf.status)return false;
     return true;
   });
@@ -2101,9 +2111,9 @@ function setProjectDeadline(pid,val){const p=DB.getProject(pid);if(!p)return;p.d
 
 function exportTimelineCSV(){
   const ps=DB.getProjects();const now=new Date();
-  const rows=[['Project ID','Project Name','Type','Client','Creator','Status','Created','Deadline','Days Active','Overdue','Stage History']];
+  const rows=[['Project ID','Project Name','Type','Client','AI PM','Status','Created','Deadline','Days Active','Overdue','Stage History']];
   ps.forEach(p=>{
-    const cl=DB.getUser(p.clientId);const cr=DB.getUser(p.assignedCreatorId);
+    const cl=DB.getUser(p.clientId);const cr=DB.getPM(p.assignedPmId);
     const days=p.createdAt?daysBetween(p.createdAt,now.toISOString()):0;
     const overdue=p.deadline&&new Date(p.deadline)<now?'Yes':'No';
     const hist=(p.stageHistory||[]).map(h=>h.stage+'@'+new Date(h.enteredAt).toLocaleDateString()).join(' | ');
@@ -3833,7 +3843,7 @@ function doPost(e) {
     
     // Projects sheet
     let sheet = ss.getSheetByName('Projects') || ss.insertSheet('Projects');
-    if(sheet.getLastRow()===0) sheet.appendRow(['ID','Project ID','Name','Type','Client','Client ID','Creator','Status','Priority','Deadline','Synopsis Revisions','Storyboard Released','Created','Updated']);
+    if(sheet.getLastRow()===0) sheet.appendRow(['ID','Project ID','Name','Type','Client','Client ID','AI PM','Status','Priority','Deadline','Synopsis Revisions','Storyboard Released','Created','Updated']);
     const existingIds = sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),1).getValues().flat();
     data.projects.forEach(p => {
       const row = [p.id,p.projectId||'',p.name,p.type,p.client,p.clientId,p.creator,p.status,p.priority||'',p.deadline||'',p.synopsisRevisions,p.storyboardReleased,p.createdAt,p.updatedAt];
@@ -4419,7 +4429,7 @@ async function submitBrief(){
     id:gid('p'),projectId:genProjectId(),type,
     name:(answers.brand||answers.title||answers.show||answers.artist||answers.topic||'New '+mt.label)+' — '+mt.label,
     deadline:null,stageHistory:[{stage:'brief_submitted',enteredAt:new Date().toISOString()}],
-    clientId:S.session.userId,assignedCreatorId:null,
+    clientId:S.session.userId,assignedCreatorId:null,assignedPmId:null,
     clientBrief:{...answers,videoRefUrl:refUrl||'',additionalNotes:notes||''},
     clientRefs:_briefRefs.slice(),
     workflowStatus:'brief_submitted',newBrief:true,
@@ -4516,7 +4526,7 @@ function showRegModal(role){
 <div class="fg"><label>Email</label><input type="text" id="re" placeholder="email@company.com"/></div>
 ${!ic?'<div class="fg"><label>Username (for login)</label><input type="text" id="ru" placeholder="e.g. priya.sharma"/></div>':''}
 <div class="fg"><label>Password ${ic?'(auto-generated if blank)':''}</label><input type="text" id="rp" value="${ic?gpw():''}"/></div>
-<div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'Creator'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+<div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'AI PM'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doRegister(role){
   const name=document.getElementById('rn')?.value.trim();if(!name){toast('Name required','err');return}
@@ -4527,7 +4537,7 @@ function doRegister(role){
   const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString()};
   if(ic)u.clientId=gcid();else u.username=username;
   DB.saveUser(u);closeModal();render();
-  toast(`${ic?'Client':'Creator'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
+  toast(`${ic?'Client':'AI PM'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
 }
 
@@ -4564,11 +4574,11 @@ function showAssignModal(pid){
   const emps=DB.getUsers().filter(u=>u.role==='creator');
   const clients=DB.getUsers().filter(u=>u.role==='client');
   openModal(`<div class="modal-title">Assign — ${esc(p.name)}</div>
-<div class="fg"><label>Creator</label><select id="ae"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}"${p.assignedCreatorId===e.id?' selected':''}>${esc(e.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>AI PM</label><select id="ae"><option value="">Unassigned</option>${DB.getPMs().map(pm=>`<option value="${pm.id}"${p.assignedPmId===pm.id?' selected':''}}>${esc(pm.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Client</label><select id="ac"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${p.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
 <div class="btn-row"><button class="btn btn-gold" onclick="saveAssignment('${pid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
-function saveAssignment(pid){const p=DB.getProject(pid);if(!p)return;p.assignedCreatorId=document.getElementById('ae')?.value||null;p.clientId=document.getElementById('ac')?.value||null;DB.saveProject(p);closeModal();render();toast('Saved!','ok');}
+function saveAssignment(pid){const p=DB.getProject(pid);if(!p)return;p.assignedPmId=document.getElementById('ae')?.value||null;p.clientId=document.getElementById('ac')?.value||null;DB.saveProject(p);closeModal();render();toast('Saved!','ok');}
 
 function showNewProjModal(prefill){
   const clients=DB.getUsers().filter(u=>u.role==='client');
@@ -4597,7 +4607,7 @@ ${[{v:'low',l:'Low',c:'var(--t4)',bg:'var(--bg3)'},{v:'medium',l:'Medium',c:'#F5
 <div class="section-lbl">Assignment & Timeline</div>
 <div class="form2">
 <div class="fg"><label>Link Client</label><select id="np-c"><option value="">No client</option>${clients.map(c=>`<option value="${c.id}"${pf.clientId===c.id?' selected':''}>${esc(c.name)} (${c.clientId||'—'})</option>`).join('')}</select></div>
-<div class="fg"><label>Assign Creator</label><select id="np-e"><option value="">Unassigned</option>${emps.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
+<div class="fg"><label>Assign AI PM</label><select id="np-e"><option value="">Unassigned</option>${DB.getPMs().map(pm=>`<option value="${pm.id}">${esc(pm.name)}</option>`).join('')}</select></div>
 <div class="fg"><label>Deadline</label><input type="date" id="np-dl" value="${pf.deadline||''}"/></div>
 <div class="fg"><label>Tags</label><input type="text" id="np-tags" value="${esc((pf.tags||[]).join(', '))}" placeholder="e.g. urgent, brand, social"/></div>
 </div>
@@ -4610,7 +4620,7 @@ function doNewProject(){
   const name=document.getElementById('np-n')?.value.trim();if(!name){toast('Name required','err');return}
   const type=document.getElementById('np-t')?.value;
   const clientId=document.getElementById('np-c')?.value||null;
-  const empId=document.getElementById('np-e')?.value||null;
+  const pmId=document.getElementById('np-e')?.value||null;
   const deadline=document.getElementById('np-dl')?.value||null;
   const notes=document.getElementById('np-notes')?.value.trim()||'';
   const tagsRaw=document.getElementById('np-tags')?.value||'';
@@ -4618,7 +4628,7 @@ function doNewProject(){
   const priority=document.getElementById('np-pri')?.value||'medium';
   const mt=MT[type];
   const initWf=document.getElementById('np-wfinit')?.value||null;
-  const p={id:gid('p'),projectId:genProjectId(),type,name,clientId,assignedCreatorId:empId,
+  const p={id:gid('p'),projectId:genProjectId(),type,name,clientId,assignedCreatorId:null,assignedPmId:pmId,
     workflowStatus:initWf||(clientId?'brief_submitted':'new'),
     priority,tags,
     clientBrief:{},clientRefs:[],brief:{},script:'',bible:{},shots:[],refs:[],sbState:{},
@@ -4635,7 +4645,7 @@ function doNewProject(){
   // Open detail view instead of jumping straight to Studio
   S.tab='projects';S.detailPid=p.id;render();
   pushToRole('admin','project','New project created',p.name+' ('+p.projectId+')',p.id);
-  if(empId)pushNotif(empId,'project','New project assigned',p.name+' assigned to you',p.id);
+  if(pmId){const pm=DB.getPM(pmId);if(pm)toast('Project assigned to '+pm.name+' (AI PM)','ok');}
   if(clientId)pushNotif(clientId,'project','Project started',p.name+' has been set up for you',p.id);
 }
 
@@ -4667,7 +4677,8 @@ function openModal(html){document.getElementById('modal-root').innerHTML=`<div c
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
-function viewAsClient(cid){const og=S.session.userId;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();toast('Viewing as client. Sign out to return to admin.','info');}
+function viewAsClient(cid){const og=S.session.userId;const ogName=S.session.name;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,_ogName:ogName,_impersonating:true,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();}
+function returnToAdmin(){if(!S.session._og)return;S.session={...S.session,userId:S.session._og,name:S.session._ogName||'Admin',role:'admin',_og:null,_ogName:null,_impersonating:false};S.view='admin';S.tab='dashboard';render();}
 
 // ══════════════════════════════════════
 // STUDIO
