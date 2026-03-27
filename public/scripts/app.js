@@ -831,7 +831,7 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
 </button>
 </div>
 ${S.session?._impersonating?'<button class="btn btn-ghost btn-sm" onclick="returnToAdmin()" style="border-color:var(--gold);color:var(--gold)">← Admin</button>':\'\'}
-${S.session?._impersonating?`<button class="btn btn-gold btn-sm" onclick="returnToAdmin()">← Return to Admin</button>`:''}<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
+<button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
 </div>
 <div id="notif-panel" style="display:none;position:fixed;top:46px;right:10px;width:320px;max-height:440px;background:var(--bg3);border:1px solid var(--b2);border-radius:9px;z-index:300;overflow:hidden;box-shadow:0 8px 24px #000a">
