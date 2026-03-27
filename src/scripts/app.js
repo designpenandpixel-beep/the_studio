@@ -913,7 +913,14 @@ function adminMain(){
 // ── DASHBOARD CHARTS ─────────────────────────────────────
 function initDashCharts(){
   const canvas=document.getElementById('chart-status');
-  if(!canvas||!window.Chart)return;
+  if(!canvas)return;
+  if(!window.Chart){
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+    s.onload=()=>initDashCharts();
+    document.head.appendChild(s);
+    return;
+  }
   // Destroy existing chart instance if any
   const existing=Chart.getChart(canvas);
   if(existing)existing.destroy();
