@@ -4875,7 +4875,7 @@ function showAIPMBriefingResult(pid,pm,result){
 
 <!-- ACTIONS -->
 <div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--b1);flex-wrap:wrap">
-  <button class="btn btn-gold" onclick="generateBrandBook('${pid}',${JSON.stringify(result).replace(/'/g,"\'")})">📥 Generate Brand Book PDF</button>
+  <button class="btn btn-gold" onclick="generateBrandBook('${pid}')
   <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
 </div>`;
 
@@ -4902,7 +4902,8 @@ function approvePMCreator(pid, creatorId, creatorName){
   render();
 }
 
-async function generateBrandBook(pid, result){
+async function generateBrandBook(pid){
+  const result=window._pmBriefingResult?.result;
   const p=DB.getProject(pid);
   const cl=DB.getUser(p?.clientId);
   const pm=DB.getPM(p?.assignedPmId);
