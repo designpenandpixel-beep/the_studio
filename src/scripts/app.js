@@ -161,7 +161,7 @@ const VEO_RULES=[
 // ══════════════════════════════════════
 // DATA LAYER — in-memory cache + localStorage fallback + Supabase sync
 // ══════════════════════════════════════
-let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[];
+let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[], _pmChats=[];
 function _tryLS(fn){try{fn()}catch(e){console.warn('localStorage error:',e.message);}}
 
 // Debounce utility — delays fn execution until wait ms after last call
@@ -183,6 +183,7 @@ function _loadLS(){
   _tryLS(()=>{const n=localStorage.getItem('sv2_notifs');if(n)_notifs=JSON.parse(n)});
   _tryLS(()=>{const i=localStorage.getItem('sv2_integrations');if(i)_integrations=JSON.parse(i)});
   _tryLS(()=>{const l=localStorage.getItem('sv2_ld');if(l)_ldEntries=JSON.parse(l)});
+  _tryLS(()=>{const c=localStorage.getItem('sv2_pmchats');if(c)_pmChats=JSON.parse(c)});
 }
 _loadLS();
 
@@ -585,6 +586,18 @@ const DB={
     _ldEntries=_ldEntries.filter(x=>x.id!==id);
     _tryLS(()=>localStorage.setItem('sv2_ld',JSON.stringify(_ldEntries)));
     SB.delLD(id);
+  },
+  getPMChats:(clientId)=>_pmChats.filter(m=>m.clientId===clientId),
+  getPMChatsByPM:(pmId)=>_pmChats.filter(m=>m.pmId===pmId),
+  savePMChat:(msg)=>{
+    const i=_pmChats.findIndex(x=>x.id===msg.id);
+    if(i>=0)_pmChats[i]=msg;else _pmChats.push(msg);
+    _tryLS(()=>localStorage.setItem('sv2_pmchats',JSON.stringify(_pmChats)));
+    SB.push('studio_pmchats',msg.id,msg);
+  },
+  deletePMChat:(id)=>{
+    _pmChats=_pmChats.filter(x=>x.id!==id);
+    _tryLS(()=>localStorage.setItem('sv2_pmchats',JSON.stringify(_pmChats)));
   },
 };
 
@@ -2758,6 +2771,7 @@ function clientPMChatFull(pm, user){
       <div style="display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--b1)">
         <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="changePMConfirm('${user.id}')">↔ Change PM</button>
         <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="viewPMMemory('${pm.id}','${user.id}')">🧠 PM Memory</button>
+        <button class="btn btn-gold btn-sm" style="font-size:9px" onclick="openTrainPMModal('${pm.id}','${user.id}')">📚 Train My PM</button>
       </div>
     </div>
 
@@ -2805,6 +2819,134 @@ function clientPMChatFull(pm, user){
 
   </div>`;
 }
+
+
+// ── TRAIN MY PM ────────────────────────────────────────────────
+function openTrainPMModal(pmId, clientId){
+  const mem=DB.getPMMemory(pmId,clientId);
+  const pm=DB.getPM(pmId);
+  openModal(`
+    <div class="modal-title">📚 Train ${esc(pm?.name||'Your PM')}</div>
+    <div style="font-size:11px;color:var(--t4);margin-bottom:16px">Upload skills and brand knowledge to make your PM more personalized. Everything is saved to your PM's memory.</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="fg"><label>Brand Voice & Tone</label>
+        <textarea id="train-voice" rows="2" placeholder="e.g. Professional but warm, avoids jargon…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(mem.brandVoice||'')}</textarea></div>
+      <div class="fg"><label>Visual Style Preferences</label>
+        <textarea id="train-visual" rows="2" placeholder="Cinematic dark tones, minimal design, bold typography…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(mem.visualStyle||'')}</textarea></div>
+      <div class="fg"><label>Target Audience</label>
+        <textarea id="train-audience" rows="2" placeholder="Urban professionals 25-40, tech-savvy…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(mem.targetAudience||'')}</textarea></div>
+      <div class="fg"><label>Things to Avoid</label>
+        <textarea id="train-avoid" rows="2" placeholder="Never use the word 'cheap', avoid aggressive sales tone…" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:9px;border-radius:6px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(mem.avoidList||'')}</textarea></div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">UPLOAD SKILL / KNOWLEDGE FILE</label>
+        <div onclick="document.getElementById('pm-skill-file').click()" style="border:2px dashed var(--b2);border-radius:10px;padding:16px;text-align:center;cursor:pointer" onmouseenter="this.style.borderColor='var(--gold)'" onmouseleave="this.style.borderColor='var(--b2)'">
+          <div style="font-size:18px;margin-bottom:4px">📄</div>
+          <div style="font-size:11px;color:var(--t3);font-weight:600">Click to upload .txt, .md, or PDF</div>
+        </div>
+        <input type="file" id="pm-skill-file" accept=".txt,.md,.pdf" style="display:none" onchange="loadPMSkillFile(this,'${pmId}','${clientId}')">
+        <div id="skill-file-status" style="font-size:10px;color:var(--green);margin-top:5px;display:none"></div>
+        ${mem.uploadedSkills?.length?`<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:4px">${mem.uploadedSkills.map(s=>`<span style="background:rgba(16,185,129,0.1);color:var(--green);border:1px solid rgba(16,185,129,0.2);border-radius:4px;font-size:9px;padding:2px 8px">✓ ${esc(s.name)}</span>`).join('')}</div>`:''}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-gold" style="flex:1" onclick="saveTrainPM('${pmId}','${clientId}')">💾 Save to PM Memory</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+
+function loadPMSkillFile(input, pmId, clientId){
+  const file=input.files[0];if(!file)return;
+  const status=document.getElementById('skill-file-status');
+  if(status){status.style.display='block';status.textContent='Reading file…';}
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    const text=e.target.result;
+    const mem=DB.getPMMemory(pmId,clientId);
+    if(!mem.uploadedSkills)mem.uploadedSkills=[];
+    if(status)status.textContent='✦ PM is learning from this file…';
+    try{
+      const summary=await callClaude('Extract key brand/skill knowledge from this document. Be concise and structured.',`File: "${file.name}"
+
+${text.substring(0,4000)}`,400);
+      mem.uploadedSkills.push({name:file.name,summary,addedAt:new Date().toISOString()});
+      if(!mem.learnings)mem.learnings=[];
+      mem.learnings.push('[From '+file.name+']: '+summary.substring(0,200));
+      DB.savePMMemory(pmId,clientId,mem);
+      if(status){status.textContent='✓ "'+file.name+'" learned by PM';status.style.color='var(--green)';}
+      toast('PM learned from '+file.name,'ok');
+    }catch(e){
+      mem.uploadedSkills.push({name:file.name,summary:text.substring(0,500),addedAt:new Date().toISOString()});
+      DB.savePMMemory(pmId,clientId,mem);
+      if(status){status.textContent='✓ "'+file.name+'" saved to PM memory';status.style.color='var(--green)';}
+    }
+  };
+  reader.readAsText(file);
+}
+
+function saveTrainPM(pmId, clientId){
+  const mem=DB.getPMMemory(pmId,clientId);
+  const voice=document.getElementById('train-voice')?.value?.trim();
+  const visual=document.getElementById('train-visual')?.value?.trim();
+  const audience=document.getElementById('train-audience')?.value?.trim();
+  const avoid=document.getElementById('train-avoid')?.value?.trim();
+  if(voice)mem.brandVoice=voice;
+  if(visual)mem.visualStyle=visual;
+  if(audience)mem.targetAudience=audience;
+  if(avoid)mem.avoidList=avoid;
+  const summary=[];
+  if(voice)summary.push('Brand voice: '+voice.substring(0,80));
+  if(audience)summary.push('Audience: '+audience.substring(0,80));
+  if(avoid)summary.push('Avoid: '+avoid.substring(0,80));
+  if(summary.length){if(!mem.learnings)mem.learnings=[];mem.learnings.push('[Brand Training] '+summary.join(' | '));}
+  DB.savePMMemory(pmId,clientId,mem);
+  closeModal();toast('PM memory updated ✦','ok');render();
+}
+
+// ── ADMIN PM CHAT VIEW ─────────────────────────────────────────
+function adminViewClientChat(clientId){
+  const user=DB.getUser(clientId);
+  if(!user){toast('Client not found','err');return;}
+  const pm=user.assignedPmId?DB.getPM(user.assignedPmId):null;
+  if(!pm){toast('This client has no assigned PM yet','err');return;}
+  openModal(`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      ${clientAvatar(user,40,10)}
+      <div><div style="font-size:14px;font-weight:800;color:var(--t1)">${esc(user.name)} ↔ ${esc(pm.name)}</div>
+      <div style="font-size:10px;color:var(--t4)">Admin view — full conversation history</div></div>
+    </div>
+    ${adminChatThreadHTML(clientId,pm)}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <textarea id="admin-chat-input" rows="2" placeholder="Send a message as ${esc(pm.name)}…" style="flex:1;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px 12px;border-radius:6px;font-size:11px;resize:none"></textarea>
+      <button class="btn btn-gold" style="align-self:flex-end" onclick="adminSendAsPM('${clientId}','${pm.id}')">Send as PM</button>
+    </div>
+    <div style="font-size:9px;color:var(--t4);margin-top:5px;text-align:center">Messages appear in the client's PM chat as ${esc(pm.name)}</div>
+  `);
+}
+
+function adminChatThreadHTML(clientId,pm){
+  const chats=DB.getPMChats(clientId).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+  if(!chats.length)return`<div style="text-align:center;color:var(--t4);font-size:11px;padding:24px">No messages yet.</div>`;
+  return`<div style="height:260px;overflow-y:auto;background:var(--bg3);border:1px solid var(--b1);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:7px">
+    ${chats.map(m=>{const isClient=m.role==='client';return`<div style="display:flex;${isClient?'justify-content:flex-end':''}">
+      <div style="max-width:75%;background:${isClient?'rgba(196,157,58,0.12)':'var(--bg2)'};border:1px solid ${isClient?'rgba(196,157,58,0.25)':'var(--b2)'};border-radius:${isClient?'12px 12px 2px 12px':'12px 12px 12px 2px'};padding:8px 12px">
+        <div style="font-size:9px;font-weight:700;color:${isClient?'var(--gold)':'var(--cyan)'};margin-bottom:2px">${isClient?'CLIENT':'PM'}</div>
+        <div style="font-size:11px;color:var(--t1);line-height:1.5">${esc(m.text)}</div>
+        <div style="font-size:8px;color:var(--t4);margin-top:3px;text-align:right">${new Date(m.ts).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+      </div></div>`;}).join('')}
+  </div>`;
+}
+
+async function adminSendAsPM(clientId,pmId){
+  const input=document.getElementById('admin-chat-input');
+  const text=input?.value?.trim();if(!text)return;
+  const pm=DB.getPM(pmId);
+  DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text,ts:new Date().toISOString(),sentByAdmin:true});
+  pushNotif(clientId,'pm_message','Message from '+(pm?.name||'PM'),'Your PM sent you a message.');
+  input.value='';toast('Sent as '+(pm?.name||'PM'),'ok');
+  closeModal();adminViewClientChat(clientId);
+}
+
 
 let _pmChatMode='message';
 function setPMChatMode(mode){
