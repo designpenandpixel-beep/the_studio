@@ -494,10 +494,10 @@ async function persistImage(url){
   // Uploads image to imgbb via server proxy, returns permanent URL
   // Falls back to original URL if upload fails
   try{
-    const r=await fetch('/api/imgbb',{
+    const r=await fetch('/api/supabase-upload',{
       method:'POST',
       headers:_authHeaders(),
-      body:JSON.stringify({image:url})
+      body:JSON.stringify({url,type:'image'})
     });
     if(!r.ok)return url;
     const d=await r.json();
@@ -507,6 +507,8 @@ async function persistImage(url){
     return url;
   }
 }
+
+async function persistVideo(url){try{const r=await fetch('/api/supabase-upload',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,type:'video'})});if(!r.ok)return url;const d=await r.json();return d.url||url;}catch(e){console.warn('Video persist failed:',e.message,'— using original URL');return url;}}
 
 SB.init();
 
@@ -6307,7 +6309,7 @@ async function doVid(p,vp){
   try{
     for(let a=0;a<=2;a++){
       try{
-        const url=await falVid(imgUrl,prompt,dur,rat);
+        const rawUrl=await falVid(imgUrl,prompt,dur,rat);const url=await persistVideo(rawUrl);
         S.vidState[vp.num]={url,status:'done',frameUrl:imgUrl,modelId,dur,rat};
         setVb(vp.num,'done','done');setVv(vp.num,url);
         break;
