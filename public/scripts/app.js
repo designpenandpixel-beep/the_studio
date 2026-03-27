@@ -676,6 +676,7 @@ function render(){
   setTimeout(updateNotifBadge,50);
   setTimeout(()=>SB._updateDot(),60);
   setTimeout(bindInboxNotifs,70);
+  setTimeout(initDashCharts,120);
 }
 // Bind inbox notification click events (safe from XSS — uses data attributes not inline onclick)
 function bindInboxNotifs(){
@@ -908,6 +909,48 @@ function adminMain(){
   return adminDashboard();
 }
 
+
+// ── DASHBOARD CHARTS ─────────────────────────────────────
+function initDashCharts(){
+  const canvas=document.getElementById('chart-status');
+  if(!canvas||!window.Chart)return;
+  // Destroy existing chart instance if any
+  const existing=Chart.getChart(canvas);
+  if(existing)existing.destroy();
+  const ps=DB.getProjects();
+  const complete=ps.filter(p=>p.workflowStatus==='complete').length;
+  const inProd=ps.filter(p=>['storyboard_in_progress','storyboard_review'].includes(p.workflowStatus)).length;
+  const inReview=ps.filter(p=>p.workflowStatus?.includes('review')).length;
+  const brief=ps.filter(p=>['brief_submitted','new'].includes(p.workflowStatus)).length;
+  const total=ps.length;
+  if(!total){canvas.parentNode.innerHTML='<div style="height:140px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--t4)">No projects yet</div>';return;}
+  new Chart(canvas,{
+    type:'doughnut',
+    data:{
+      labels:['In Review','In Production','Complete','Brief Stage'],
+      datasets:[{
+        data:[inReview,inProd,complete,brief],
+        backgroundColor:['#F59E0B','#06B6D4','#10B981','#8B5CF6'],
+        borderWidth:0,
+        hoverOffset:4
+      }]
+    },
+    options:{
+      responsive:false,
+      cutout:'72%',
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:'rgba(0,0,0,0.8)',
+          titleFont:{size:10},
+          bodyFont:{size:10},
+          callbacks:{label:ctx=>' '+ctx.label+': '+ctx.raw}
+        }
+      }
+    }
+  });
+}
+
 function adminDashboard(){
   const ps=DB.getProjects();const us=DB.getUsers();
   const clients=us.filter(u=>u.role==='client');const creators=us.filter(u=>u.role==='creator');
@@ -969,6 +1012,137 @@ ${(()=>{
   ${s.d?`<div style="margin-top:4px">${s.d}</div>`:''}
 </div>`).join('');})()}
 </div>
+
+<!-- ── VISUAL ANALYTICS SECTION ─────────────────────────── -->
+<div id="dash-analytics" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+
+  <!-- PIE: Project Status -->
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:18px">
+    <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">Project Status</div>
+    <div style="font-size:9px;color:var(--t4);margin-bottom:14px">Distribution across pipeline stages</div>
+    <div style="position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+      <canvas id="chart-status" width="140" height="140"></canvas>
+      <div style="position:absolute;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--t1)">${ps.length}</div>
+        <div style="font-size:9px;color:var(--t4)">total</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      ${[
+        {label:'In Review',count:flt.filter(p=>p.workflowStatus?.includes('review')).length,color:'#F59E0B'},
+        {label:'In Production',count:inProd,color:'#06B6D4'},
+        {label:'Complete',count:complete,color:'#10B981'},
+        {label:'Brief Stage',count:flt.filter(p=>['brief_submitted','new'].includes(p.workflowStatus)).length,color:'#8B5CF6'},
+      ].map(s=>`<div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0"></div>
+          <div style="font-size:9px;color:var(--t3)">${s.label}</div>
+        </div>
+        <div style="font-size:10px;font-weight:700;color:var(--t1)">${s.count}</div>
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <!-- BAR: Project Types -->
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:18px">
+    <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">Project Types</div>
+    <div style="font-size:9px;color:var(--t4);margin-bottom:14px">Breakdown by media category</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${(()=>{
+        const types={};
+        ps.forEach(p=>{const t=MT[p.type]?.label||p.type||'Unknown';types[t]=(types[t]||0)+1;});
+        const sorted=Object.entries(types).sort((a,b)=>b[1]-a[1]).slice(0,6);
+        const max=sorted[0]?.[1]||1;
+        const colors=['#FF6B35','#8B5CF6','#06B6D4','#10B981','#F59E0B','#EC4899'];
+        return sorted.map(([label,count],i)=>`
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <div style="font-size:9px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${label}</div>
+              <div style="font-size:9px;font-weight:700;color:var(--t1)">${count}</div>
+            </div>
+            <div style="background:var(--bg3);border-radius:3px;height:6px;overflow:hidden">
+              <div style="height:100%;width:${Math.round((count/max)*100)}%;background:${colors[i%colors.length]};border-radius:3px;transition:width 0.6s ease"></div>
+            </div>
+          </div>`).join('') || '<div style="font-size:10px;color:var(--t4);text-align:center;padding:20px 0">No projects yet</div>';
+      })()}
+    </div>
+  </div>
+
+  <!-- PIPELINE HEALTH + CLIENT ACTIVITY -->
+  <div style="display:flex;flex-direction:column;gap:10px">
+
+    <!-- Pipeline Health -->
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:16px;flex:1">
+      <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">Pipeline Health</div>
+      <div style="font-size:9px;color:var(--t4);margin-bottom:12px">Completion & attention rate</div>
+      ${(()=>{
+        const total=ps.length||1;
+        const completePct=Math.round((complete/total)*100);
+        const attentionPct=Math.round((needs.length/total)*100);
+        const prodPct=Math.round((inProd/total)*100);
+        return`
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <div style="font-size:9px;color:var(--t3)">✓ Completed</div>
+            <div style="font-size:9px;font-weight:700;color:var(--green)">${completePct}%</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:4px;height:8px;overflow:hidden">
+            <div style="height:100%;width:${completePct}%;background:linear-gradient(90deg,#10B981,#06B6D4);border-radius:4px"></div>
+          </div>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <div style="font-size:9px;color:var(--t3)">▶ In Production</div>
+            <div style="font-size:9px;font-weight:700;color:var(--cyan)">${prodPct}%</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:4px;height:8px;overflow:hidden">
+            <div style="height:100%;width:${prodPct}%;background:linear-gradient(90deg,#06B6D4,#8B5CF6);border-radius:4px"></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <div style="font-size:9px;color:var(--t3)">⚡ Need Attention</div>
+            <div style="font-size:9px;font-weight:700;color:${attentionPct>30?'var(--red)':'var(--gold)'}">${attentionPct}%</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:4px;height:8px;overflow:hidden">
+            <div style="height:100%;width:${attentionPct}%;background:linear-gradient(90deg,#EF4444,#FF6B35);border-radius:4px"></div>
+          </div>
+        </div>`;
+      })()}
+    </div>
+
+    <!-- Client Activity -->
+    <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;padding:16px;flex:1">
+      <div style="font-size:11px;font-weight:700;color:var(--t1);margin-bottom:4px">Client Activity</div>
+      <div style="font-size:9px;color:var(--t4);margin-bottom:10px">Projects per client</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${(()=>{
+          const clientData=clients.map(c=>({
+            name:c.name,
+            count:ps.filter(p=>p.clientId===c.id).length,
+            logo:c.logoUrl
+          })).sort((a,b)=>b.count-a.count).slice(0,4);
+          const max=clientData[0]?.count||1;
+          return clientData.map(c=>`
+            <div style="display:flex;align-items:center;gap:8px">
+              ${c.logo?`<img src="${c.logo}" style="width:20px;height:20px;border-radius:4px;object-fit:contain;flex-shrink:0">`:`<div style="width:20px;height:20px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--t3);flex-shrink:0">${(c.name[0]||'?').toUpperCase()}</div>`}
+              <div style="flex:1;min-width:0">
+                <div style="font-size:9px;color:var(--t2);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.name)}</div>
+                <div style="background:var(--bg3);border-radius:3px;height:4px;overflow:hidden">
+                  <div style="height:100%;width:${Math.round((c.count/max)*100)}%;background:var(--gold);border-radius:3px"></div>
+                </div>
+              </div>
+              <div style="font-size:10px;font-weight:700;color:var(--t1);flex-shrink:0">${c.count}</div>
+            </div>`).join('') || '<div style="font-size:10px;color:var(--t4);text-align:center;padding:10px 0">No clients yet</div>';
+        })()}
+      </div>
+    </div>
+
+  </div>
+
+</div>
+<!-- ── END ANALYTICS ─────────────────────────────────────── -->
+
 <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:11px 13px;margin-bottom:12px">
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
 <div style="flex:1;min-width:140px"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Search</div>
