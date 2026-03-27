@@ -2473,15 +2473,13 @@ function confirmAssignPM(clientId,pmId){
 // ── CLIENT PM PAGE ──────────────────────────────────────────────────────────
 function clientPMPage(){
   const user=DB.getUser(S.session.userId);
+  // Validate PM exists — stale IDs can cause crash
   const assignedPm=user?.assignedPmId?DB.getPM(user.assignedPmId):null;
+  // Clear stale PM reference
+  if(user?.assignedPmId&&!assignedPm){user.assignedPmId=null;DB.saveUser(user);}
   const allPms=DB.getPMs().sort((a,b)=>(b.avgRating||0)-(a.avgRating||0));
-  if(S.pmView==='directory'){
-    return clientPMDirectory(allPms);
-  }
-  if(assignedPm){
-    return clientPMChatFull(assignedPm,user);
-  }
-  // No PM assigned - show directory to choose one
+  if(S.pmView==='directory') return clientPMDirectory(allPms);
+  if(assignedPm) return clientPMChatFull(assignedPm,user);
   return clientPMDirectory(allPms);
 }
 
