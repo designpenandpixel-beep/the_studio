@@ -830,7 +830,7 @@ ${r==='admin'?`<button class="app-bar-keys-btn btn btn-ghost btn-sm" onclick="go
   <div id="notif-badge" class="notif-count" style="display:none"></div>
 </button>
 </div>
-(S.session?._impersonating?'<button class="btn btn-ghost btn-sm" onclick="returnToAdmin()" style="border-color:var(--gold);color:var(--gold)">&#8592; Admin</button>':'')+
+${S.session?._impersonating?'<button class="btn btn-gold btn-sm" onclick="returnToAdmin()">&#8592; Admin</button>':''}
 <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
 </div>
 </div>
