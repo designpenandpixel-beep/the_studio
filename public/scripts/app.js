@@ -161,7 +161,7 @@ const VEO_RULES=[
 // ══════════════════════════════════════
 // DATA LAYER — in-memory cache + localStorage fallback + Supabase sync
 // ══════════════════════════════════════
-let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[], _pmChats=[];
+let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[], _pmChats=[], _pmMemory={};
 function _tryLS(fn){try{fn()}catch(e){console.warn('localStorage error:',e.message);}}
 
 // Debounce utility — delays fn execution until wait ms after last call
@@ -184,6 +184,7 @@ function _loadLS(){
   _tryLS(()=>{const i=localStorage.getItem('sv2_integrations');if(i)_integrations=JSON.parse(i)});
   _tryLS(()=>{const l=localStorage.getItem('sv2_ld');if(l)_ldEntries=JSON.parse(l)});
   _tryLS(()=>{const c=localStorage.getItem('sv2_pmchats');if(c)_pmChats=JSON.parse(c)});
+  _tryLS(()=>{const m=localStorage.getItem('sv2_pmmem');if(m)_pmMemory=JSON.parse(m)});
 }
 _loadLS();
 
@@ -598,6 +599,15 @@ const DB={
   deletePMChat:(id)=>{
     _pmChats=_pmChats.filter(x=>x.id!==id);
     _tryLS(()=>localStorage.setItem('sv2_pmchats',JSON.stringify(_pmChats)));
+  },
+  getPMMemory:(pmId,clientId)=>{
+    const key=pmId+'_'+clientId;
+    return _pmMemory[key]||{learnings:[],projects:[],brandNotes:'',uploadedSkills:[]};
+  },
+  savePMMemory:(pmId,clientId,mem)=>{
+    const key=pmId+'_'+clientId;
+    _pmMemory[key]=mem;
+    _tryLS(()=>localStorage.setItem('sv2_pmmem',JSON.stringify(_pmMemory)));
   },
 };
 
