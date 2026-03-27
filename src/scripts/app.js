@@ -3060,6 +3060,48 @@ async function saveImprovePM(pmId, clientId){
 
 
 // ── ADMIN PM CHAT VIEW ─────────────────────────────────────────
+function adminChangePM(clientId){
+  const client=DB.getUser(clientId);
+  if(!client)return;
+  const pms=DB.getPMs();
+  openModal(`
+    <div class="modal-title">↔ Change AI PM — ${esc(client.name)}</div>
+    <div style="font-size:11px;color:var(--t4);margin-bottom:14px">Select a new AI PM for this client. Their chat history will be preserved.</div>
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;margin-bottom:16px">
+      ${pms.map(pm=>`<div onclick="document.querySelectorAll('.pm-select-card').forEach(c=>{c.style.borderColor='var(--b1)';c.style.background='var(--bg2)'});this.style.borderColor='var(--gold)';this.style.background='rgba(196,157,58,0.08)';document.getElementById('admin-pm-select').value='${pm.id}'" class="pm-select-card" style="display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid ${client.assignedPmId===pm.id?'var(--gold)':'var(--b1)'};border-radius:8px;padding:12px;cursor:pointer;transition:all 0.15s">
+        <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--gold),var(--orange));display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#000;flex-shrink:0">${pm.name[0].toUpperCase()}</div>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:700;color:var(--t1)">${esc(pm.name)}</div>
+          <div style="font-size:10px;color:var(--cyan)">${esc(pm.domain)}</div>
+          <div style="font-size:9px;color:var(--t4);margin-top:2px">${esc(pm.bio?.substring(0,60)||'')}${pm.bio?.length>60?'…':''}</div>
+        </div>
+        ${client.assignedPmId===pm.id?'<span style="font-size:9px;color:var(--gold);font-weight:700">Current</span>':''}
+      </div>`).join('')}
+      ${!pms.length?'<div style="color:var(--t4);font-size:11px;text-align:center;padding:20px">No PMs available</div>':''}
+    </div>
+    <input type="hidden" id="admin-pm-select" value="${client.assignedPmId||''}">
+    <div class="btn-row">
+      <button class="btn btn-gold" onclick="saveAdminPMChange('${clientId}')">Save Change</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+
+function saveAdminPMChange(clientId){
+  const pmId=document.getElementById('admin-pm-select')?.value;
+  if(!pmId){toast('Select a PM first','err');return;}
+  const client=DB.getUser(clientId);
+  const pm=DB.getPM(pmId);
+  if(!client||!pm)return;
+  client.assignedPmId=pmId;
+  DB.saveUser(client);
+  // Notify client
+  pushNotif(clientId,'system','Your AI PM has been updated',pm.name+' is now your dedicated AI Project Manager.');
+  closeModal();render();
+  toast(pm.name+' assigned to '+client.name,'ok');
+}
+
+
 function adminViewClientChat(clientId){
   const user=DB.getUser(clientId);
   if(!user){toast('Client not found','err');return;}
@@ -5594,7 +5636,7 @@ ${ic?`<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
 <div class="fg"><label>Email</label><input type="text" id="re" placeholder="email@company.com"/></div>
 ${!ic?'<div class="fg"><label>Username (for login)</label><input type="text" id="ru" placeholder="e.g. priya.sharma"/></div>':''}
 <div class="fg"><label>Password ${ic?'(auto-generated if blank)':''}</label><input type="text" id="rp" value="${ic?gpw():''}"/></div>
-${ic?`<div class="fg"><label>Assign AI PM <span style="font-size:9px;color:var(--t4);font-weight:400">(auto-assigned to all their projects)</span></label><select id="rpm"><option value="">— No PM assigned yet —</option>${pms.map(pm=>`<option value="${pm.id}">${esc(pm.name)} · ${esc(pm.domain)}</option>`).join('')}</select></div>`:''}
+${ic?`<div class="fg"><label>Assign AI PM <span style="font-size:9px;color:var(--red);font-weight:600">* Required</span></label><select id="rpm" style="border-color:var(--b2)"><option value="">— Select a PM —</option>${pms.map(pm=>`<option value="${pm.id}">${esc(pm.name)} · ${esc(pm.domain)}</option>`).join('')}</select>${!pms.length?`<div style="font-size:9px;color:var(--red);margin-top:3px">No PMs available — create PMs from the AI PMs tab first.</div>`:''}</div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'AI PM'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function doRegister(role){
@@ -5604,7 +5646,7 @@ function doRegister(role){
   const username=document.getElementById('ru')?.value.trim()||name.toLowerCase().replace(/\s+/g,'.');
   const ic=role==='client';
   const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString()};
-  if(ic){u.clientId=gcid();const pmId=document.getElementById('rpm')?.value||null;if(pmId)u.assignedPmId=pmId;const logo=window._regLogoData;if(logo){u.logoUrl=logo;window._regLogoData=null;}}else u.username=username;
+  if(ic){const pmId=document.getElementById('rpm')?.value||null;if(!pmId){toast('Please select an AI PM — it is required','err');return;}u.clientId=gcid();u.assignedPmId=pmId;const logo=window._regLogoData;if(logo){u.logoUrl=logo;window._regLogoData=null;}}else u.username=username;
   DB.saveUser(u);closeModal();render();
   toast(`${ic?'Client':'AI PM'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
@@ -5612,11 +5654,21 @@ function doRegister(role){
 
 function showEditUserModal(uid){
   const u=DB.getUser(uid);if(!u)return;
-  openModal(`<div class="modal-title">Edit ${u.role} — ${esc(u.name)}</div>
+  const pms=DB.getPMs();
+  openModal(`<div class="modal-title">Edit ${u.role==='client'?'Client':'Creator'} — ${esc(u.name)}</div>
 <div class="fg"><label>Full Name</label><input type="text" id="eu-n" value="${esc(u.name)}"/></div>
 <div class="fg"><label>Email</label><input type="text" id="eu-e" value="${esc(u.email||'')}"/></div>
 <div class="fg"><label>Password</label><input type="password" id="eu-p" value="${esc(u.password||'')}"/></div>
-${u.role==='client'?`<div class="ib ib-blue" style="margin-top:0">Client ID: <strong style="color:var(--purple)">${u.clientId}</strong></div>`:''}
+${u.role==='client'?`
+<div class="fg"><label>Assign AI PM <span style="font-size:9px;color:var(--t4);font-weight:400">Change or assign dedicated PM</span></label>
+<select id="eu-pm">
+  <option value="">— No PM —</option>
+  ${pms.map(pm=>`<option value="${pm.id}"${u.assignedPmId===pm.id?' selected':''}>${esc(pm.name)} · ${esc(pm.domain)}</option>`).join('')}
+</select></div>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+  <div style="font-size:10px;color:var(--t4)">Client ID:</div>
+  <code style="color:var(--purple);font-size:11px">${u.clientId}</code>
+</div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
 function previewRegLogo(input){
@@ -5629,7 +5681,22 @@ function previewRegLogo(input){
   };
   reader.readAsDataURL(file);
 }
-function doEditUser(uid){const u=DB.getUser(uid);if(!u)return;u.name=document.getElementById('eu-n')?.value.trim()||u.name;u.email=document.getElementById('eu-e')?.value.trim()||u.email;u.password=document.getElementById('eu-p')?.value.trim()||u.password;DB.saveUser(u);closeModal();render();toast('User updated!','ok');}
+function doEditUser(uid){
+  const u=DB.getUser(uid);if(!u)return;
+  u.name=document.getElementById('eu-n')?.value.trim()||u.name;
+  u.email=document.getElementById('eu-e')?.value.trim()||u.email;
+  u.password=document.getElementById('eu-p')?.value.trim()||u.password;
+  if(u.role==='client'){
+    const pmId=document.getElementById('eu-pm')?.value||null;
+    const oldPmId=u.assignedPmId;
+    u.assignedPmId=pmId||null;
+    if(pmId&&pmId!==oldPmId){
+      const pm=DB.getPM(pmId);
+      pushNotif(u.id,'system','Your AI PM has been updated',pm?.name+' is now your dedicated AI Project Manager.');
+    }
+  }
+  DB.saveUser(u);closeModal();render();toast('Updated!','ok');
+}
 function toggleActive(uid){const u=DB.getUser(uid);if(!u)return;u.active=!(u.active!==false);DB.saveUser(u);auditLog('user_status_changed',u.active?'Activated':'Deactivated',uid);render();toast(u.active?'Activated':'Deactivated',u.active?'ok':'info');}
 
 function showAssignClientsModal(empId){
