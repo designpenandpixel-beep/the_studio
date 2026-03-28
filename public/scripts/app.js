@@ -2256,7 +2256,7 @@ ${emps.map(e=>{
     <span>${completedProjects.length} completed</span>
   </div>
   <div style="display:flex;gap:4px">
-    ${e.firstLogin?`<button class="btn btn-outline btn-sm" style="width:100%;justify-content:center;margin-bottom:6px;color:#F59E0B;border-color:#F59E0B44" onclick="showCreatorCredentialsModal(${JSON.stringify({id:e.id,name:e.name,username:e.username||e.name.toLowerCase().replace(/\\s+/g,'.')}),e.username||e.name.toLowerCase().replace(/\s+/g,'.'),e.password)">📋 Copy Credentials</button>`:''}
+    ${(()=>{window._credU=e;return '';})()}${e.firstLogin?`<button class="btn btn-outline btn-sm" style="width:100%;justify-content:center;margin-bottom:6px;color:#F59E0B;border-color:#F59E0B44" onclick="showCreatorCredentialsModal(window._credU,window._credU.username||window._credU.name.toLowerCase().replace(/\\s+/g,'.'),window._credU.password)">📋 Copy Credentials</button>`:''}
 <div style="display:flex;gap:4px">
 <button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
     <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
