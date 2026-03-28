@@ -3552,7 +3552,8 @@ function studioShell(content, activeSection){
   <div style="display:flex;gap:2px;overflow-x:auto;padding-bottom:0">
     ${tabs.map(t=>{
       const isAct=activeSect===t.k;
-      return`<button onclick="S.qgMode='${t.k==='image'?'txt2img':t.k}';render()" onmouseenter="if(!${isAct})this.style.background='rgba(255,255,255,0.04)'" onmouseleave="if(!${isAct})this.style.background='transparent'" style="display:flex;align-items:center;gap:7px;padding:10px 18px;border:none;border-bottom:2px solid ${isAct?t.accent:'transparent'};background:${isAct?'rgba('+t.accent.replace('#','').match(/.{2}/g).map(x=>parseInt(x,16)).join(',')+',0.08)`:'transparent'};cursor:pointer;white-space:nowrap;transition:all 0.15s;border-radius:0">
+      const bg=isAct?t.accent+'18':'transparent';
+      return`<button onclick="S.qgMode='${t.k==='image'?'txt2img':t.k}';render()" onmouseenter="if(!${isAct})this.style.background='rgba(255,255,255,0.04)'" onmouseleave="this.style.background='${bg}'" style="display:flex;align-items:center;gap:7px;padding:10px 18px;border:none;border-bottom:2px solid ${isAct?t.accent:'transparent'};background:${bg};cursor:pointer;white-space:nowrap;transition:all 0.15s;border-radius:0">
         <span style="font-size:15px">${t.ico}</span>
         <div style="text-align:left">
           <div style="font-size:11px;font-weight:700;color:${isAct?t.accent:'#6B6B8A'};transition:color 0.15s">${t.lbl}</div>
