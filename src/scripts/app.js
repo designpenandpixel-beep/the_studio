@@ -722,10 +722,12 @@ function loginHTML(){
 
 // Brute force protection
 let _loginAttempts=0,_loginLockUntil=0;
-let _sessionToken=null; // Server-signed session token
+let _sessionToken=null;
+function _flashSignInBtn(){var b=document.getElementById('signin-btn');if(b){b.style.transform='scale(0.95)';b.style.opacity='0.7';setTimeout(function(){b.style.transform='';b.style.opacity='';},150);}}
 function _showLoginErr(msg){const el=document.getElementById('lerr');if(el){el.style.display='block';el.textContent=msg;}}
 
 async function doLogin(){
+  _flashSignInBtn();
   const now=Date.now();
   if(now<_loginLockUntil){_showLoginErr(`Too many attempts. Try again in ${Math.ceil((_loginLockUntil-now)/1000)}s.`);return;}
   const id=document.getElementById('lid').value.trim();
@@ -826,8 +828,8 @@ function appBarHTML(){
     new:_i('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',14),
     assets:_i('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',14),
   };
-  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'pms',l:'AI PMs'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
-  const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
+  const adminNav=[{k:'dashboard',l:'Dashboard'},{k:'projects',l:'All Projects'},{k:'quickgen',l:'❆ Quick Generate'},{k:'timeline',l:'Timeline'},{k:'clients',l:'Clients'},{k:'creators',l:'Creators'},{k:'integrations',l:'Integrations'},{k:'pms',l:'AI PMs'},{k:'ld',l:'L&D'},{k:'leads',l:'Leads'},{k:'settings',l:'Settings'}];
+  const creatorNav=[{k:'dashboard',l:'My Projects'},{k:'quickgen',l:'❆ Quick Generate'},{k:'clients',l:'My Clients'},{k:'inbox',l:'Inbox'}];
   const clientNav=[{k:'dashboard',l:'My Projects'},{k:'pm',l:'My PM'},{k:'quickgen',l:'✦ Quick Generate'},{k:'new',l:'+ New Request'},{k:'assets',l:'Brand Folder'}];
   const nav=r==='admin'?adminNav:r==='creator'?creatorNav:clientNav;
   const roleLabel=r==='admin'?'Admin':r==='creator'?'AI PM':'Client';
@@ -897,6 +899,7 @@ function goTab(t){saveInputs();S.tab=t;if(t!=='studio')S.pid=null;render()}
 // ══════════════════════════════════════
 function adminMain(){
   if(S.tab==='studio'&&S.pid)return studioWrap();
+  if(S.tab==='quickgen')return singleImageGen();
   if(S.tab==='projects')return adminProjects();
   if(S.tab==='clients')return adminClients();
   if(S.tab==='creators')return adminCreators();
@@ -2594,6 +2597,15 @@ function openPMModal(pmId){
         ${['Entry','Mid','Senior','Expert'].map(l=>`<option value="${l}"${pm.level===l?' selected':''}>${l}</option>`).join('')}
       </select>
     </div>
+    <div class="fg" style="margin-top:10px">
+      <label style="display:flex;justify-content:space-between;align-items:center">Skill Instructions <span style="font-size:9px;color:var(--t4);font-weight:400">Full system prompt this PM uses — admin only</span></label>
+      <textarea id="pm-skill-doc" rows="6" placeholder="Describe how this PM should behave, what tone to use, what to avoid, domain expertise, style guidelines..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px;border-radius:5px;font-size:10px;resize:vertical;font-family:monospace;box-sizing:border-box">${esc(pm.skillDoc||pm.bio||'')}\</textarea>
+      <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
+        <input type="file" id="pm-skill-upload" accept=".txt,.md" style="display:none" onchange="loadPMSkillDoc(this)">
+        <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="document.getElementById('pm-skill-upload').click()">Upload .txt/.md</button>
+        <span style="font-size:9px;color:var(--t4)" id="pm-skill-upload-name"></span>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn btn-gold" style="flex:1" onclick="savePMModal('${pmId||''}')">Save PM</button>
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -2608,11 +2620,12 @@ function savePMModal(existingId){
   const skillsRaw=document.getElementById('pm-skills')?.value||'';
   const skills=skillsRaw.split(',').map(s=>s.trim()).filter(Boolean);
   const level=document.getElementById('pm-level')?.value||'Senior';
+  const skillDoc=document.getElementById('pm-skill-doc')?.value?.trim()||'';
   if(!name)return toast('PM name required','err');
   if(!domain)return toast('Select a domain','err');
   const pm={
     id:existingId||gid('pm'),
-    name,domain,bio,skills,level,
+    name,domain,bio,skills,level,skillDoc,
     ratings:existingId?DB.getPM(existingId)?.ratings||[]:[],
     avgRating:existingId?DB.getPM(existingId)?.avgRating||0:0,
     createdAt:existingId?DB.getPM(existingId)?.createdAt:new Date().toISOString(),
@@ -2623,6 +2636,17 @@ function savePMModal(existingId){
   toast(existingId?'PM updated!':'PM created!','ok');
 }
 
+function loadPMSkillDoc(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const ta=document.getElementById('pm-skill-doc');
+    if(ta)ta.value=e.target.result;
+    const nm=document.getElementById('pm-skill-upload-name');
+    if(nm)nm.textContent=file.name+' loaded';
+  };
+  reader.readAsText(file);
+}
 function deletePM(id){
   if(!confirm('Delete this PM? This cannot be undone.'))return;
   DB.deletePM(id);render();toast('PM deleted','ok');
@@ -3356,6 +3380,8 @@ async function sendPMChatMessage(pmId,clientId){
 
   // Save client message
   DB.savePMChat({id:gid('msg'),clientId,pmId,role:'client',text,ts:new Date().toISOString(),type:_pmChatMode==='project'?'project_request':'message'});
+  // Notify admin
+  pushToRole('admin','chat','Client messaged PM: '+(user.name||'')+' → '+(pm.name||''),text.substring(0,120),null);
 
   if(_pmChatMode==='project'){
     // PM creates project draft
@@ -3390,7 +3416,7 @@ Return ONLY valid JSON:
       const mem=DB.getPMMemory(pmId,clientId);
       const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('\n');
       const r=await callClaude(
-        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'\n\nBrand notes: '+mem.brandNotes:''}`,
+        `${pm.skillDoc||('You are '+pm.name+', an AI Project Manager specialising in '+pm.domain+'. You know this brand well. Keep responses concise, professional, and helpful.')}${mem.brandNotes?'\n\nBrand notes: '+mem.brandNotes:''}`,
         `Recent conversation:\n${recentChats}\n\nClient: ${text}`,
         300
       );
@@ -3446,16 +3472,15 @@ function rejectProjectFromChat(msgId){
 
 function changePMConfirm(clientId){
   openModal(`<div style="max-width:360px;text-align:center;padding:8px">
-    <div style="font-size:32px;margin-bottom:12px">↔</div>
-    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:8px">Change Your AI PM?</div>
-    <div style="font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:20px">Your current PM's work on ongoing projects will continue. The new PM takes over from your <strong style="color:var(--gold)">next project</strong> onwards.<br><br>Your chat history and brand notes will be preserved.</div>
+    <div style="font-size:32px;margin-bottom:12px">⇔</div>
+    <div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:8px">Change AI PM?</div>
+    <div style="font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:20px">The new PM takes over from the <strong style="color:var(--gold)">next project</strong> onwards. Chat history and brand notes are preserved.</div>
     <div style="display:flex;gap:8px;justify-content:center">
-      <button class="btn btn-gold" onclick="closeModal();S.tab='pm';S.pmView='directory';render()">Browse PMs</button>
+      <button class="btn btn-gold" onclick="closeModal();assignPMToClient('${clientId}')">Select New PM</button>
       <button class="btn btn-ghost" onclick="closeModal()">Keep Current PM</button>
     </div>
   </div>`);
 }
-
 function viewPMMemory(pmId,clientId){
   const mem=DB.getPMMemory(pmId,clientId);
   openModal(`<div style="min-width:380px">
@@ -4215,7 +4240,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 </div>
 </div></div>
 
-<div class="card"><div class="card-head"><span class="card-title">👤 ADMIN ACCOUNT</span></div><div class="card-body">
+<div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">🌐 GLOBAL & NEGATIVE PROMPTS</span><span style="font-size:9px;color:var(--t4);font-weight:400">Injected into every AI call — admin only</span></div><div class="card-body"><div class="ib ib-blue" style="margin-bottom:10px">These apply to <strong>every query</strong> across the platform. Global prompt sets tone/rules. Negative prompt tells the AI what to avoid.</div><div class="fg" style="margin-bottom:10px"><label>Global / Universal Prompt <span style="font-size:8px;color:var(--t4);font-weight:400">(prepended to every AI system prompt)</span></label><textarea id="global-prompt" rows="4" placeholder="e.g. You are part of CinexAI, a premium AI media production studio. Always be professional, brand-first, and results-driven. Never break character..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px;border-radius:5px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(u.globalPrompt||'')}</textarea></div><div class="fg" style="margin-bottom:12px"><label>Negative Prompt <span style="font-size:8px;color:var(--red);font-weight:400">(appended as DO NOT rules)</span></label><textarea id="negative-prompt" rows="3" placeholder="e.g. Never suggest competitors. Avoid informal language. Do not make promises about pricing or timelines..." style="width:100%;background:var(--bg3);border:1px solid rgba(239,68,68,0.2);color:var(--t1);padding:8px;border-radius:5px;font-size:11px;resize:vertical;box-sizing:border-box">${esc(u.negativePrompt||'')}</textarea></div><button class="btn btn-gold" onclick="saveGlobalPrompts()">Save Prompts</button></div></div><div class="card"><div class="card-head"><span class="card-title">👤 ADMIN ACCOUNT</span></div><div class="card-body">
 <div class="form2">
 <div class="fg"><label>Admin Name</label><input type="text" id="admin-name" value="${esc(u.name||'Admin')}"/></div>
 <div class="fg"><label>Admin Password</label><input type="password" id="admin-pw" value="${esc(u.password||'')}"/></div>
@@ -4470,6 +4495,13 @@ async function leadsAddNote(type,idx){
 }
 
 function saveSheetUrl(){const u=DB.getUser(S.session?.userId);if(!u)return;u.sheetsUrl=document.getElementById('sheets-url')?.value.trim()||'';DB.saveUser(u);}
+function saveGlobalPrompts(){
+  const u=getAdminUser();if(!u)return;
+  u.globalPrompt=document.getElementById('global-prompt')?.value||'';
+  u.negativePrompt=document.getElementById('negative-prompt')?.value||'';
+  DB.saveUser(u);
+  toast('Prompts saved and active on all AI calls','ok');
+}
 function saveAdminAccount(){const u=DB.getUser(S.session?.userId);if(!u)return;const n=document.getElementById('admin-name')?.value.trim();const p=document.getElementById('admin-pw')?.value.trim();if(n)u.name=n;if(p)u.password=p;DB.saveUser(u);S.session.name=u.name;DB.setSession(S.session);render();toast('Account saved!','ok');}
 
 function showSheetsSetupModal(){
@@ -6014,6 +6046,27 @@ ${!assets.length?'<div style="color:var(--t4);font-size:10px;padding:12px;grid-c
 
 function openModal(html){document.getElementById('modal-root').innerHTML=`<div class="modal-wrap" onclick="if(event.target===this)closeModal()"><div class="modal-box"><button class="modal-close" onclick="closeModal()">✕</button>${html}</div></div>`;}
 function closeModal(){document.getElementById('modal-root').innerHTML='';}
+function goBack(){
+  if(S.creatorDetailPid){S.creatorDetailPid=null;render();return;}
+  if(S.detailPid){S.detailPid=null;render();return;}
+  if(S.pmView&&S.pmView!=='profile'){S.pmView='profile';render();return;}
+  if(S.tab!=='dashboard'){S.tab='dashboard';render();return;}
+}
+function backBtn(label){
+  return '<button class="btn btn-ghost btn-sm" style="margin-bottom:14px;font-size:11px;display:inline-flex;align-items:center;gap:5px" onclick="goBack()">← '+(label||'Back')+'</button>';
+}
+function showForgotModal(){
+  openModal(
+    '<div style="max-width:340px;text-align:center;padding:8px">'
+    +'<div style="font-size:28px;margin-bottom:12px">&#128272;</div>'
+    +'<div style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:8px">Forgot Password?</div>'
+    +'<div style="font-size:12px;color:var(--t3);line-height:1.7;margin-bottom:16px">Passwords are managed by your CinexAI admin.<br>Contact your admin to have your password reset.</div>'
+    +'<div style="background:rgba(196,157,58,0.08);border:1px solid rgba(196,157,58,0.2);border-radius:8px;padding:12px;font-size:11px;color:var(--t3);margin-bottom:16px">Reach out to your account manager or CinexAI admin directly.</div>'
+    +'<button class="btn btn-ghost" style="width:100%" onclick="closeModal()">Close</button>'
+    +'</div>'
+  );
+}
+
 function openImgModal(title,url,prompt){if(!url)return;openModal(`<div class="modal-title" style="display:flex;align-items:center;justify-content:space-between">${esc(title)}<div style="display:flex;gap:5px"><button class="btn btn-ghost btn-sm" onclick="toggleImgFullscreen()" title="Fullscreen">⛶ Fullscreen</button><button class="btn btn-ghost btn-sm" onclick="dlImg('${url}','${esc(title||'image')}.jpg')" title="Download">↓</button></div></div><img src="${url}" id="modal-img-fs" style="width:100%;border-radius:6px;margin-bottom:10px;cursor:pointer" onclick="toggleImgFullscreen()"/>${prompt?`<div style="background:var(--bg3);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow-y:auto"><div style="font-size:8px;color:var(--t4);text-transform:uppercase;margin-bottom:3px">Prompt</div><div style="font-size:10px;color:var(--t3);line-height:1.4;word-break:break-word">${esc(prompt)}</div></div>`:''}<button class="btn btn-ghost" onclick="closeModal()">Close</button>`);}
 function toggleImgFullscreen(){const img=document.getElementById('modal-img-fs');if(!img)return;if(!document.fullscreenElement){img.requestFullscreen?.().catch(()=>{img.style.position='fixed';img.style.top='0';img.style.left='0';img.style.width='100vw';img.style.height='100vh';img.style.objectFit='contain';img.style.zIndex='99999';img.style.background='#000';img.style.borderRadius='0';img.dataset.fsFallback='1';});}else{document.exitFullscreen?.();}}
 function viewAsClient(cid){const og=S.session.userId;const ogName=S.session.name;auditLog('admin_impersonation','Admin viewing as client',cid);S.session={...S.session,_og:og,_ogName:ogName,_impersonating:true,userId:cid,role:'client',name:DB.getUser(cid)?.name||'Client'};S.view='client';S.tab='dashboard';render();}
@@ -7811,6 +7864,12 @@ function saveInputs(){
 async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
   aiStart();
   try{
+  // Inject global + negative prompts from admin settings
+  const _admin=getAdminUser();
+  const _gp=(_admin?.globalPrompt||'').trim();
+  const _np=(_admin?.negativePrompt||'').trim();
+  if(_gp) sys=_gp+'\n\n'+sys;
+  if(_np) sys=sys+'\n\nDO NOT: '+_np;
   const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
   const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
   const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
@@ -7923,6 +7982,9 @@ async function urlToB64(url){try{const r=await fetch(url);const b=await r.blob()
       render();
     },45000);
   }
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){closeModal();var p=document.getElementById('notif-panel');if(p)p.style.display='none';}
+  });
   document.addEventListener('click',function(e){
     const panel=document.getElementById('notif-panel');
     if(panel&&panel.style.display!=='none'&&!panel.contains(e.target)&&!e.target.closest('[onclick*="toggleNotifPanel"]')){
