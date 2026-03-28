@@ -26,10 +26,11 @@ function isAllowedUrl(urlStr) {
 }
 
 export async function POST({ request }) {
-    // Session validation (soft check — only enforced if SESSION_SECRET is set)
+    // Session validation — allow if session exists OR FAL_KEY env var set OR client auth provided
     if (import.meta.env.SESSION_SECRET) {
       const session = await getSession(request);
-      if (!session) {
+      const hasFalKey = !!import.meta.env.FAL_KEY;
+      if (!session && !hasFalKey) {
         return new Response(JSON.stringify({ error: 'Authentication required' }), {
           status: 401, headers: { 'Content-Type': 'application/json' }
         })

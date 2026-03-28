@@ -7947,19 +7947,10 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
   const k=kC(); // client-side key (may be empty if server has CLAUDE_API_KEY env var)
   const content=[];if(imgB64&&imgType)content.push({type:'image',source:{type:'base64',media_type:imgType,data:imgB64}});content.push({type:'text',text:user});
   const payload=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:max,system:sys,messages:[{role:'user',content}]});
-  // Route through Supabase edge function to avoid CORS (Anthropic API blocks direct browser requests)
-  const sbUrl=(SB._url||localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
-  const sbKey=SB._key||localStorage.getItem('sb_key')||'';
-  const proxyUrl=sbUrl?sbUrl+'/functions/v1/claude-proxy':'';
-  let r;
-  if(proxyUrl&&sbKey){
-    r=await fetch(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':sbKey,'Authorization':'Bearer '+sbKey},body:JSON.stringify({apiKey:k,...JSON.parse(payload)})});
-  }else{
-    // Server route — sends client key as header; server prefers its own CLAUDE_API_KEY env var
-    const headers=_authHeaders({'anthropic-version':'2023-06-01'});
-    if(k)headers['x-api-key']=k; // only send if we have one — server may have its own
-    r=await fetch('/api/claude',{method:'POST',headers,body:payload});
-  }
+  // Always route through server-side proxy (/api/claude) — avoids CORS, supports both env key and client key
+  const headers=_authHeaders({'anthropic-version':'2023-06-01','content-type':'application/json'});
+  if(k)headers['x-api-key']=k;
+  const r=await fetch('/api/claude',{method:'POST',headers,body:payload});
   const d=await r.json();if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
   var _usedModel=d.model||'claude-sonnet-4-20250514';
   if(!window._modelLog)window._modelLog=[];

@@ -5,6 +5,7 @@ import { getSession } from '../../lib/auth.js';
 function getCorsOrigin(request) {
   const origin = request.headers.get('origin') || '';
   const allowed = [
+    'https://thestudioastro.vercel.app',
     'https://the-studio-ten.vercel.app',
     'http://localhost:4321',
     'http://localhost:3000',
@@ -31,11 +32,14 @@ const MAX_BODY_SIZE = 256 * 1024;
 export const POST = async ({ request }) => {
   const headers = corsHeaders(request);
 
-  // Verify session token if SESSION_SECRET is configured (soft check — doesn't block if auth not set up)
+  // Auth: require session OR a valid client API key (allows key-based access without session)
   const sessionSecret = import.meta.env.SESSION_SECRET;
   if (sessionSecret) {
     const session = await getSession(request);
-    if (!session) {
+    const clientKey = request.headers.get('x-api-key');
+    const serverKey = import.meta.env.CLAUDE_API_KEY || import.meta.env.ANTHROPIC_API_KEY;
+    // Allow if: valid session OR server key set OR client provided key
+    if (!session && !serverKey && !clientKey) {
       return new Response(JSON.stringify({ error: 'Authentication required. Please sign in again.' }), {
         status: 401, headers: { ...headers, 'Content-Type': 'application/json' },
       });
