@@ -3615,6 +3615,8 @@ async function enhancePromptQG(){
 async function runSingleGen(count=1){
   const prompt=document.getElementById('sg-prompt')?.value?.trim();
   if(!prompt)return toast('Please enter a prompt','err');
+  const falKey=kF();
+  if(!falKey)return toast('Enter fal.ai key in Settings → API Keys','err');
   S.sgPrompt=prompt;
   const model=document.getElementById('sg-model')?.value||IMG_MODELS[0].id;
   const ratio=document.getElementById('sg-ratio')?.value||'1:1';
@@ -3624,25 +3626,26 @@ async function runSingleGen(count=1){
   S.sgResults=S.sgResults||[];
   for(let i=0;i<count;i++){
     try{
-      const r=await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,messages:[
-          {role:'user',content:`Improve this image prompt for ${model}: "${prompt}". Style: ${style}. Ratio: ${ratio}. Return ONLY the improved prompt, nothing else.`}
-        ]})
-      });
-      const d=await r.json();
-      const improvedPrompt=d.content?.[0]?.text?.trim()||prompt;
-      const falKey=window._falKey||'';
-      if(!falKey){toast('fal.ai API key not configured','err');break;}
-      // Generate via fal.ai
-      await generateImage({id:gid('sg'),prompt:improvedPrompt,model,aspectRatio:ratio,quality:'hd',tone:style},'single');
+      // Improve prompt via /api/claude proxy (no direct browser CORS)
+      let improvedPrompt=prompt;
+      try{
+        improvedPrompt=await callClaude(
+          'You are an expert AI image prompt engineer. Return ONLY the improved prompt, no explanation.',
+          'Improve this prompt for model '+model+'. Style: '+style+'. Ratio: '+ratio+'.\n\nOriginal: "'+prompt+'"',
+          200
+        );
+        improvedPrompt=(improvedPrompt||'').trim()||prompt;
+      }catch(e){improvedPrompt=prompt;}
+      // Set state so falImg picks up correct model/ratio/tone
+      S.imgModel=model;S.imgAspect=ratio;S.imgTone=style;S.imgQuality='hd';
+      const url=await falImg(improvedPrompt);
+      S.sgResults.unshift({id:gid('sg'),url,prompt:improvedPrompt,model,ts:new Date().toISOString()});
+      render();
+      toast('Image ready!','ok');
     }catch(e){toast('Generation failed: '+e.message,'err');}
   }
-  if(btn){btn.textContent='✦ Generate Image';btn.disabled=false;}
+  if(btn){btn.textContent='❆ Generate';btn.disabled=false;}
 }
-
-
-
 async function improvePromptAI(){
   const el=document.getElementById('ref-prompt');
   const current=el?.value?.trim();
