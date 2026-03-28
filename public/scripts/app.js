@@ -714,8 +714,9 @@ function loginHTML(){
 <div class="login-err" id="lerr"></div>
 <div class="fg"><label>Username or Client ID</label><input type="text" id="lid" placeholder="admin  /  EMP-username  /  CLI1234" onkeydown="if(event.key==='Enter')doLogin()"/></div>
 <div class="fg"><label>Password</label><input type="password" id="lpw" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
-<button class="btn btn-gold" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">Sign In →</button>
-<div style="margin-top:18px;text-align:center;font-size:9px;color:var(--t4)">Secure workspace — contact your admin for credentials</div>
+<button id="signin-btn" class="btn btn-gold" style="width:100%;justify-content:center;margin-top:4px;transition:transform 0.1s,opacity 0.1s" onclick="doLogin()">Sign In →</button>
+<div style="margin-top:10px;text-align:center"><span style="font-size:10px;color:var(--t4);cursor:pointer;text-decoration:underline;opacity:0.7" onclick="showForgotModal()">Forgot password?</span></div>
+<div style="margin-top:6px;text-align:center;font-size:9px;color:var(--t4)">Secure workspace — contact your admin for credentials</div>
 </div></div>
 </div>`;
 }
@@ -3545,7 +3546,7 @@ function studioShell(content, activeSection){
   <div style="display:flex;gap:2px;overflow-x:auto;padding-bottom:0">
     ${tabs.map(t=>{
       const isAct=activeSect===t.k;
-      return`<button onclick="S.qgMode='${t.k==='image'?'txt2img':t.k}';render()" style="display:flex;align-items:center;gap:7px;padding:10px 18px;border:none;border-bottom:2px solid ${isAct?t.accent:'transparent'};background:transparent;cursor:pointer;white-space:nowrap;transition:all 0.15s;border-radius:0">
+      return`<button onclick="S.qgMode='${t.k==='image'?'txt2img':t.k}';render()" onmouseenter="if(!${isAct})this.style.background='rgba(255,255,255,0.04)'" onmouseleave="if(!${isAct})this.style.background='transparent'" style="display:flex;align-items:center;gap:7px;padding:10px 18px;border:none;border-bottom:2px solid ${isAct?t.accent:'transparent'};background:${isAct?'rgba('+t.accent.replace('#','').match(/.{2}/g).map(x=>parseInt(x,16)).join(',')+',0.08)`:'transparent'};cursor:pointer;white-space:nowrap;transition:all 0.15s;border-radius:0">
         <span style="font-size:15px">${t.ico}</span>
         <div style="text-align:left">
           <div style="font-size:11px;font-weight:700;color:${isAct?t.accent:'#6B6B8A'};transition:color 0.15s">${t.lbl}</div>
@@ -3584,7 +3585,8 @@ function singleImageGen(){
 <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase">Prompt</label>
 <button onclick="enhancePromptQG()" id="enhance-btn" style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);border-radius:6px;color:#8B5CF6;font-size:9px;font-weight:700;padding:3px 10px;cursor:pointer;letter-spacing:0.04em">✦ Enhance</button>
 </div>
-<textarea id="sg-prompt" rows="4" placeholder="Describe what you want to generate — subject, lighting, mood, camera angle, style..." style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.sgPrompt||''}</textarea>
+<textarea id="sg-prompt" rows="4" placeholder="Describe what you want to generate — subject, lighting, mood, camera angle, style..." onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();runSingleGen();}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.sgPrompt||''}</textarea>
+<div style="font-size:9px;color:#3a3a55;margin-top:4px;text-align:right">&#8984;+Enter to generate</div>
 <div id="enhance-status" style="font-size:9px;color:#8B5CF6;margin-top:4px;display:none">✦ Enhancing with AI...</div>
 </div>
 ${mode==='img2img'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px;margin-bottom:14px">
@@ -3607,9 +3609,19 @@ ${mode==='styleref'?`<div style="background:rgba(255,255,255,0.02);border:1px so
 <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px;margin-bottom:14px">
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
 ${mode!=='img2img'?`<div class="fg"><label>Model</label><select id="sg-model" onchange="S.singleGenModel=this.value" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)">${models.map(m=>`<option value="${m.id}"${selModel===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>`:''}
-<div class="fg"><label>Aspect Ratio</label><select id="sg-ratio" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)"><option value="1:1">1:1 Square</option><option value="9:16">9:16 Portrait</option><option value="16:9" selected>16:9 Landscape</option><option value="4:5">4:5 Instagram</option><option value="21:9">21:9 Cinematic</option></select></div>
+<div class="fg"><label>Aspect Ratio</label><select id="sg-ratio" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)"><option value="1:1">1:1 Square</option><option value="9:16">9:16 Portrait</option><option value="16:9" selected>16:9 Landscape</option><option value="4:5">4:5 Instagram</option><option value="21:9">21:9 Cinematic</option><option value="3:2">3:2 Photo</option><option value="21:9">21:9 Cinematic</option></select></div>
 <div class="fg"><label>Style</label><select id="sg-style" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)">${IMG_TONES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
 </div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+<div class="fg"><label>Quality</label><select id="sg-quality" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)"><option value="standard">Standard</option><option value="hd" selected>HD</option><option value="ultra">Ultra HD</option></select></div>
+<div class="fg"><label>Output Count</label><select id="sg-count" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)"><option value="1" selected>1 image</option><option value="2">2 images</option><option value="4">4 images</option></select></div>
+</div
+>
+</div>
+</div>
+<div style="margin-bottom:10px">
+<label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:5px">Negative Prompt <span style="font-weight:400;color:#3a3a55">— what to avoid</span></label>
+<input type="text" id="sg-neg-prompt" placeholder="blur, watermark, distorted, overexposed..." style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px;box-sizing:border-box">
 </div>
 <div style="display:flex;gap:8px">
 <button style="flex:1;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#FF6B35,#8B5CF6);color:#fff;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:0.02em;transition:opacity 0.2s" id="sg-btn" onclick="runSingleGen()" onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">✦ Generate</button>
@@ -3621,8 +3633,9 @@ ${mode!=='img2img'?`<div class="fg"><label>Model</label><select id="sg-model" on
 <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px">Generated</div>
 <div style="display:flex;flex-direction:column;gap:10px">
 ${(S.sgResults||[]).map(r=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;overflow:hidden;transition:border-color 0.15s" onmouseenter="this.style.borderColor='rgba(255,107,53,0.3)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)'">
-<img src="${r.url}" style="width:100%;display:block;border-radius:8px 8px 0 0" onerror="this.style.display='none'">
+<img src="${r.url}" onclick="openImgModal('Generated','${r.url}','${r.prompt||''}'.substring(0,120))" style="width:100%;display:block;border-radius:8px 8px 0 0;cursor:zoom-in" onerror="this.style.display='none'" title="Click to view full size">
 <div style="padding:8px 10px;display:flex;gap:6px">
+<div style="font-size:8px;color:#3a3a55;padding:4px 10px 0">${r.model||''} · ${r.ts?new Date(r.ts).toLocaleTimeString():''}</div>
 <a href="${r.url}" download style="flex:1;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none;background:transparent">↓ Download</a>
 <button style="font-size:10px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;background:transparent;cursor:pointer" onclick="openInCanva('${r.url}')">Canva →</button>
 <button style="font-size:10px;padding:6px 10px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);color:#8B5CF6;background:rgba(139,92,246,0.06);cursor:pointer" onclick="S.vqgSrcUrl='${r.url}';S.vqgSrcPreview='${r.url}';S.qgMode='video';render()">→ Video</button>
@@ -3984,7 +3997,7 @@ sMode==='music'?`<div style="background:rgba(255,255,255,0.02);border:1px solid 
 <div>
   <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Generated</div>
   ${results.map(a=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:4px">${esc(a.type||'Audio')}</div><div style="font-size:9px;color:#6B6B8A;margin-bottom:8px">${new Date(a.ts).toLocaleTimeString()}</div><audio controls src="${a.url}" style="width:100%;margin-bottom:8px"></audio><a href="${a.url}" download style="display:block;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a></div>`).join('')}
-  ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#127925;</div>Audio appears here</div>`:''}
+  ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#127925;</div><div style="font-size:11px;margin-bottom:4px">Generated audio appears here</div><div style="font-size:9px;color:#3a3a55">Supports: MP3, WAV download</div></div>`:''}
 </div>
 </div></div>`;
 }
@@ -4212,10 +4225,13 @@ async function runSingleGen(count=1){
   const model=document.getElementById('sg-model')?.value||IMG_MODELS[0].id;
   const ratio=document.getElementById('sg-ratio')?.value||'1:1';
   const style=document.getElementById('sg-style')?.value||'photorealistic';
+  const quality=document.getElementById('sg-quality')?.value||'hd';
+  const outputCount=parseInt(document.getElementById('sg-count')?.value||'1');
+  const finalCount=count>1?count:outputCount;
   const btn=document.getElementById('sg-btn');
   if(btn){btn.textContent='Generating…';btn.disabled=true;}
   S.sgResults=S.sgResults||[];
-  for(let i=0;i<count;i++){
+  for(let i=0;i<finalCount;i++){
     try{
       // Improve prompt via /api/claude proxy (no direct browser CORS)
       let improvedPrompt=prompt;
