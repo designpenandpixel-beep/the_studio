@@ -102,7 +102,7 @@ const IMG_MODELS=[
   {id:'fal-ai/recraft-v3',n:'Recraft V3',s:'Design, illustration, logos',tags:['design','illustration'],c:'~$0.04/img'},
   {id:'fal-ai/ideogram/v2',n:'Ideogram V2',s:'Text in images, posters',tags:['text-rendering'],c:'~$0.05/img'},
   {id:'fal-ai/stable-diffusion-v35-large',n:'Stable Diffusion 3.5',s:'Open, versatile, high detail',tags:['versatile'],c:'~$0.04/img'},
-  {id:'fal-ai/nano-banana/v1',n:'Nano Banana',s:'Ultra-photorealistic, skin detail',tags:['photorealistic','skin'],c:'~$0.08/img'},
+  {id:'fal-ai/nano-banana/v1',n:'Nano Banana',s:'Ultra-photorealistic, skin detail',tags:['photorealistic','skin'],c:'~$0.08/img',responseKey:'image'},
   {id:'fal-ai/seedream-3',n:'Seedream 3.0',s:'Artistic, stylized, cinematic',tags:['artistic','cinematic'],c:'~$0.05/img'},
   {id:'fal-ai/flux/schnell',n:'FLUX Schnell',s:'Fastest, drafts & iterations',tags:['fast','draft'],c:'~$0.01/img'},
   {id:'fal-ai/aura-flow',n:'AuraFlow',s:'Creative, painterly, artistic',tags:['artistic'],c:'~$0.03/img'},
@@ -3529,11 +3529,12 @@ function singleImageGen(){
   const selModel=S.singleGenModel||models[0].id;
   const selI2IModel=S.i2iModel||i2iModels[0]?.id||'fal-ai/flux-pro/kontext';
   const tab=(k,lbl,ico)=>`<button onclick="S.qgMode='${k}';render()" style="padding:7px 16px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${mode===k?'var(--gold)':'var(--b2)'};background:${mode===k?'rgba(196,157,58,0.15)':'transparent'};color:${mode===k?'var(--gold)':'var(--t3)'};">${ico} ${lbl}</button>`;
+  if(mode==='video')return videoGenPage();
   return`<div style="padding:20px 24px;max-width:820px;margin:0 auto">
     <div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
       <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">✦ Quick Generate</div>
       <div style="font-size:11px;color:var(--t4);margin-top:3px">Create images instantly — text, image-to-image, or style reference</div></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('txt2img','Text → Image','📝')}${tab('img2img','Image → Image','🖼')}${tab('styleref','Style Reference','🎨')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('txt2img','Text → Image','📝')}${tab('img2img','Image → Image','🖼')}${tab('styleref','Style Reference','🎨')}${tab('video','Video','&#127916;')}</div>
     </div>
     <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:22px;margin-bottom:16px">
       <div class="fg" style="margin-bottom:14px">
@@ -3590,6 +3591,310 @@ function singleImageGen(){
     </div>
   </div>`;
 }
+
+
+// ── VIDEO GENERATION PAGE ─────────────────────────────────────────────────
+const QG_VID_MODELS = [
+  {id:'fal-ai/kling-video/v2.1/master/text-to-video', n:'Kling 2.1 Master', mode:['t2v'], dur:[5,10], ratio:['16:9','9:16','1:1'], desc:'Premium cinematic quality'},
+  {id:'fal-ai/kling-video/v2.1/master/image-to-video', n:'Kling 2.1 Master (I2V)', mode:['i2v'], dur:[5,10], ratio:['16:9','9:16','1:1'], desc:'Image to cinematic video'},
+  {id:'fal-ai/minimax/video-01-live', n:'Minimax Hailuo', mode:['t2v','i2v'], dur:[6], ratio:['16:9','9:16','1:1'], desc:'Fast, high quality'},
+  {id:'fal-ai/runway-gen4/turbo/image-to-video', n:'Runway Gen-4 Turbo (I2V)', mode:['i2v'], dur:[5,10], ratio:['16:9','9:16'], desc:'Hollywood-grade image animation'},
+  {id:'fal-ai/wan-2.1/text-to-video', n:'Wan 2.1 (T2V)', mode:['t2v'], dur:[5], ratio:['16:9','9:16','1:1'], desc:'Open source powerhouse'},
+  {id:'fal-ai/wan-2.1/image-to-video', n:'Wan 2.1 (I2V)', mode:['i2v'], dur:[5], ratio:['16:9','9:16','1:1'], desc:'Open source image animation'},
+  {id:'fal-ai/luma-dream-machine/ray-2-flash', n:'Luma Ray 2 Flash', mode:['t2v','i2v'], dur:[5,9], ratio:['16:9','9:16','1:1'], desc:'Fast, creative motion'},
+  {id:'fal-ai/veo3', n:'Google Veo 3', mode:['t2v'], dur:[8], ratio:['16:9'], desc:'State-of-the-art T2V with audio'},
+  {id:'fal-ai/cogvideox-5b', n:'CogVideoX 5B', mode:['t2v'], dur:[6], ratio:['16:9'], desc:'Open source, good quality'},
+];
+const QG_VID_CAMERAS = ['None','Push in','Pull out','Pan left','Pan right','Tilt up','Tilt down','Orbit left','Orbit right','Crane up','Crane down','Handheld shake','Dolly zoom'];
+const QG_VID_STYLES = ['Cinematic','Photorealistic','Anime','3D Render','Documentary','Slow motion','Time-lapse','Noir','Vintage film','Neon/Cyberpunk'];
+
+function videoGenPage(){
+  const vMode=S.vqgMode||'t2v';
+  const selModelId=S.vqgModel||(vMode==='i2v'?QG_VID_MODELS.find(m=>m.mode.includes('i2v'))?.id:QG_VID_MODELS[0].id);
+  const selModel=QG_VID_MODELS.find(m=>m.id===selModelId)||QG_VID_MODELS[0];
+  const availModels=QG_VID_MODELS.filter(m=>m.mode.includes(vMode));
+  const tab=(k,lbl,ico)=>`<button onclick="S.vqgMode='${k}';S.vqgModel=null;render()" style="padding:7px 16px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${vMode===k?'var(--blue)':'var(--b2)'};background:${vMode===k?'rgba(79,195,247,0.12)':'transparent'};color:${vMode===k?'var(--blue)':'var(--t3)'};">${ico} ${lbl}</button>`;
+  const results=S.vqgResults||[];
+
+  return`<div style="padding:20px 24px;max-width:900px;margin:0 auto">
+<div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">&#127916; Video Generate</div>
+    <div style="font-size:11px;color:var(--t4);margin-top:3px">Text to video, image to video, and advanced controls</div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button onclick="S.qgMode='txt2img';render()" style="padding:7px 14px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t4)">&#129356; Back to Image</button>
+    ${tab('t2v','Text \u2192 Video','\U0001f4dd')}${tab('i2v','Image \u2192 Video','\U0001f5bc')}
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
+<!-- LEFT: Main controls -->
+<div>
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px;margin-bottom:12px">
+
+    <!-- Prompt -->
+    <div class="fg" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="margin:0">Prompt</label>
+        <button onclick="enhanceVidPrompt()" id="vid-enhance-btn" class="btn btn-ghost btn-sm" style="font-size:9px;padding:3px 10px;border-color:var(--blue);color:var(--blue)">&#10022; Enhance</button>
+      </div>
+      <textarea id="vid-prompt" rows="3" placeholder="Describe the scene, action, mood, lighting, camera movement..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box">${S.vqgPrompt||''}</textarea>
+    </div>
+
+    <!-- Image input for I2V -->
+    ${vMode==='i2v'?`<div style="margin-bottom:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">FIRST FRAME IMAGE</label>
+      <div onclick="document.getElementById('vid-src-file').click()" style="border:2px dashed var(--b2);border-radius:10px;padding:${S.vqgSrcPreview?'8px':'22px'};text-align:center;cursor:pointer" onmouseenter="this.style.borderColor='var(--blue)'" onmouseleave="this.style.borderColor='var(--b2)'">
+        ${S.vqgSrcPreview?`<img src="${S.vqgSrcPreview}" style="max-height:120px;max-width:100%;border-radius:6px;margin-bottom:4px"><div style="font-size:9px;color:var(--t4)">Click to change</div>`:`<div style="font-size:28px;margin-bottom:6px">&#127916;</div><div style="font-size:11px;color:var(--t3);font-weight:600">Upload first frame</div><div style="font-size:9px;color:var(--t4);margin-top:3px">AI will animate from this image</div>`}
+      </div>
+      <input type="file" id="vid-src-file" accept="image/*" style="display:none" onchange="loadVidSrcImage(this)">
+      ${S.sgResults&&S.sgResults.length?`<div style="margin-top:8px;font-size:9px;color:var(--t4)">Or use from Quick Generate:</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">${S.sgResults.slice(0,4).map(r=>`<img src="${r.url}" onclick="S.vqgSrcPreview='${r.url}';S.vqgSrcUrl='${r.url}';render()" style="width:52px;height:52px;object-fit:cover;border-radius:5px;cursor:pointer;border:2px solid ${S.vqgSrcUrl===r.url?'var(--blue)':'var(--b2)'}">`).join('')}</div>`:''}
+    </div>`:''}
+
+    <!-- Negative Prompt -->
+    <div class="fg" style="margin-bottom:14px">
+      <label>Negative Prompt <span style="font-size:9px;color:var(--t4);font-weight:400">What to avoid</span></label>
+      <input type="text" id="vid-neg-prompt" value="${S.vqgNeg||'blur, distortion, watermark, text, bad quality'}" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px 10px;border-radius:6px;font-size:11px;box-sizing:border-box">
+    </div>
+
+    <!-- Model + Duration + Ratio row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg">
+        <label>Model</label>
+        <select id="vid-model" onchange="S.vqgModel=this.value;render()">
+          ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
+        </select>
+        <div style="font-size:8px;color:var(--t4);margin-top:3px">${selModel.desc||''}</div>
+      </div>
+      <div class="fg">
+        <label>Duration</label>
+        <select id="vid-dur">
+          ${(selModel.dur||[5]).map(d=>`<option value="${d}">${d}s</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg">
+        <label>Aspect Ratio</label>
+        <select id="vid-ratio">
+          ${(selModel.ratio||['16:9']).map(r=>`<option value="${r}">${r}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- Style + Camera row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg">
+        <label>Style</label>
+        <select id="vid-style">
+          ${QG_VID_STYLES.map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg">
+        <label>Camera Movement</label>
+        <select id="vid-camera">
+          ${QG_VID_CAMERAS.map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- Generate button -->
+    <button class="btn btn-gold" style="width:100%;justify-content:center;font-size:14px;padding:12px" id="vid-gen-btn" onclick="runVideoGen()">&#127916; Generate Video</button>
+    <div id="vid-gen-status" style="font-size:10px;color:var(--t4);margin-top:8px;text-align:center;display:none">Generating... this takes 30-120 seconds depending on model</div>
+  </div>
+
+  <!-- Advanced Controls -->
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:12px;overflow:hidden">
+    <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'" style="padding:12px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;font-weight:700;color:var(--t2)">&#9881; Advanced Controls</span>
+      <span style="font-size:10px;color:var(--t4)">Shutter, speed, motion</span>
+    </div>
+    <div style="display:none;padding:16px;border-top:1px solid var(--b1)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="fg">
+          <label>Shutter Speed</label>
+          <select id="vid-shutter">
+            <option value="auto">Auto</option>
+            <option value="1/24">1/24 (Cinematic)</option>
+            <option value="1/48">1/48 (Standard)</option>
+            <option value="1/100">1/100 (Sport)</option>
+            <option value="1/250">1/250 (Freeze)</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>Motion Intensity</label>
+          <select id="vid-motion">
+            <option value="low">Low — Subtle</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High — Dynamic</option>
+            <option value="extreme">Extreme</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="fg">
+          <label>Speed Graph <span style="font-size:8px;color:var(--t4)">Time remapping</span></label>
+          <select id="vid-speed">
+            <option value="constant">Constant speed</option>
+            <option value="ease_in">Ease in (slow start)</option>
+            <option value="ease_out">Ease out (slow end)</option>
+            <option value="ease_in_out">Ease in/out</option>
+            <option value="slow_mo">Slow motion</option>
+            <option value="timelapse">Time-lapse</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>CFG Scale <span style="font-size:8px;color:var(--t4)">Prompt adherence</span></label>
+          <select id="vid-cfg">
+            <option value="5">5 — Creative</option>
+            <option value="7" selected>7 — Balanced</option>
+            <option value="10">10 — Strict</option>
+            <option value="12">12 — Very strict</option>
+          </select>
+        </div>
+      </div>
+      <!-- Last frame reference -->
+      <div style="margin-bottom:10px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">LAST FRAME REFERENCE <span style="font-size:8px;color:var(--t4);font-weight:400">Optional — guide how video ends</span></label>
+        <div onclick="document.getElementById('vid-last-frame').click()" style="border:1px dashed var(--b2);border-radius:8px;padding:${S.vqgLastPreview?'8px':'14px'};text-align:center;cursor:pointer">
+          ${S.vqgLastPreview?`<img src="${S.vqgLastPreview}" style="max-height:80px;border-radius:4px;margin-bottom:4px"><div style="font-size:8px;color:var(--t4)">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload last frame</div>`}
+        </div>
+        <input type="file" id="vid-last-frame" accept="image/*" style="display:none" onchange="loadVidLastFrame(this)">
+      </div>
+      <!-- Style reference -->
+      <div>
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">STYLE REFERENCE <span style="font-size:8px;color:var(--t4);font-weight:400">Optional — match visual style</span></label>
+        <div onclick="document.getElementById('vid-style-ref').click()" style="border:1px dashed var(--b2);border-radius:8px;padding:${S.vqgStylePreview?'8px':'14px'};text-align:center;cursor:pointer">
+          ${S.vqgStylePreview?`<img src="${S.vqgStylePreview}" style="max-height:80px;border-radius:4px;margin-bottom:4px"><div style="font-size:8px;color:var(--t4)">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload style reference</div>`}
+        </div>
+        <input type="file" id="vid-style-ref" accept="image/*" style="display:none" onchange="loadVidStyleRef(this)">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT: Results -->
+<div>
+  <div style="font-size:10px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Generated Videos</div>
+  ${results.length?results.map(v=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;overflow:hidden;margin-bottom:10px">
+    <video src="${v.url}" controls style="width:100%;border-radius:6px 6px 0 0;display:block" poster="${v.thumb||''}"></video>
+    <div style="padding:8px 10px">
+      <div style="font-size:9px;color:var(--t4);margin-bottom:5px">${v.model||''} &middot; ${v.dur||''}s &middot; ${new Date(v.ts).toLocaleTimeString()}</div>
+      <div style="font-size:10px;color:var(--t2);margin-bottom:7px;line-height:1.4">${esc(v.prompt.substring(0,80))}${v.prompt.length>80?'...':''}</div>
+      <div style="display:flex;gap:6px">
+        <a href="${v.url}" download class="btn btn-ghost btn-sm" style="flex:1;text-align:center;font-size:9px">&darr; Download</a>
+        <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="S.vqgSrcUrl='${v.url}';S.vqgSrcPreview='${v.url}';S.vqgMode='i2v';render()">Extend &rarr;</button>
+      </div>
+    </div>
+  </div>`).join(''):`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:10px;padding:32px;text-align:center;color:var(--t4);font-size:11px">
+    <div style="font-size:32px;margin-bottom:10px">&#127916;</div>
+    Your generated videos appear here
+  </div>`}
+</div>
+</div>
+</div>`;
+}
+
+function loadVidSrcImage(input){const file=input.files[0];if(!file)return;const r=new FileReader();r.onload=e=>{S.vqgSrcPreview=e.target.result;S.vqgSrcUrl=e.target.result;render();};r.readAsDataURL(file);}
+function loadVidLastFrame(input){const file=input.files[0];if(!file)return;const r=new FileReader();r.onload=e=>{S.vqgLastPreview=e.target.result;render();};r.readAsDataURL(file);}
+function loadVidStyleRef(input){const file=input.files[0];if(!file)return;const r=new FileReader();r.onload=e=>{S.vqgStylePreview=e.target.result;render();};r.readAsDataURL(file);}
+
+async function enhanceVidPrompt(){
+  const el=document.getElementById('vid-prompt');const cur=el?.value?.trim();
+  if(!cur)return toast('Enter a prompt first','err');
+  const btn=document.getElementById('vid-enhance-btn');if(btn){btn.textContent='Enhancing...';btn.disabled=true;}
+  const camera=document.getElementById('vid-camera')?.value||'';
+  const style=document.getElementById('vid-style')?.value||'Cinematic';
+  try{
+    const r=await callClaude(
+      'You are a cinematic video prompt expert. Expand and enhance prompts for AI video generation. Return ONLY the enhanced prompt, nothing else.',
+      'Enhance this video prompt. Style: '+style+'. Camera: '+camera+'.\n\nOriginal: "'+cur+'"',200
+    );
+    if(el&&r)el.value=r.trim();S.vqgPrompt=r.trim();
+    toast('Prompt enhanced','ok');
+  }catch(e){toast('Enhancement failed','err');}
+  if(btn){btn.textContent='\u2726 Enhance';btn.disabled=false;}
+}
+
+async function runVideoGen(){
+  const prompt=document.getElementById('vid-prompt')?.value?.trim();
+  if(!prompt)return toast('Enter a prompt','err');
+  const falKey=kF();
+  if(!falKey)return toast('Enter fal.ai key in Settings','err');
+  const modelId=document.getElementById('vid-model')?.value||QG_VID_MODELS[0].id;
+  const dur=parseInt(document.getElementById('vid-dur')?.value||'5');
+  const ratio=document.getElementById('vid-ratio')?.value||'16:9';
+  const style=document.getElementById('vid-style')?.value||'Cinematic';
+  const camera=document.getElementById('vid-camera')?.value||'None';
+  const motion=document.getElementById('vid-motion')?.value||'medium';
+  const speed=document.getElementById('vid-speed')?.value||'constant';
+  const neg=document.getElementById('vid-neg-prompt')?.value||'';
+  const vMode=S.vqgMode||'t2v';
+
+  // Build enriched prompt
+  let enriched=prompt;
+  if(style&&style!=='Photorealistic')enriched+='. '+style+' style.';
+  if(camera&&camera!=='None')enriched+='. Camera: '+camera+'.';
+  if(motion==='slow_mo'||speed==='slow_mo')enriched+='. Slow motion.';
+  if(speed==='timelapse')enriched+='. Time-lapse effect.';
+
+  S.vqgPrompt=prompt;S.vqgNeg=neg;
+  const btn=document.getElementById('vid-gen-btn');
+  const status=document.getElementById('vid-gen-status');
+  if(btn){btn.textContent='Generating...';btn.disabled=true;}
+  if(status)status.style.display='block';
+  aiStart();
+
+  try{
+    // Build body based on model type
+    let body={prompt:enriched,duration:dur,aspect_ratio:ratio};
+    if(neg)body.negative_prompt=neg;
+
+    // I2V models need image_url
+    if(vMode==='i2v'){
+      const imgUrl=S.vqgSrcUrl||S.vqgSrcPreview;
+      if(!imgUrl)return toast('Upload a first frame image','err');
+      body.image_url=imgUrl;
+    }
+
+    // Model-specific body adjustments
+    if(modelId.includes('minimax'))body={prompt:enriched,image_url:vMode==='i2v'?(S.vqgSrcUrl||''):'',negative_prompt:neg||undefined};
+    if(modelId.includes('runway'))body={prompt_text:enriched,image_url:S.vqgSrcUrl||'',duration:dur,ratio};
+    if(modelId.includes('cogvideo'))body={prompt:enriched,negative_prompt:neg||'',num_frames:dur*8};
+    if(modelId.includes('luma')){body={prompt:enriched,aspect_ratio:ratio,duration:dur+'s'};if(vMode==='i2v')body.keyframes={frame0:{type:'image',url:S.vqgSrcUrl||''}};}
+
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+falKey,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,120));}
+    const d=await r.json();
+    if(!d.request_id)throw new Error('No request_id — model may not be available');
+
+    // Poll for result
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+
+    for(let i=0;i<180;i++){
+      await sleep(3000);
+      if(status)status.textContent='Generating... '+Math.round(i*3/60*10)/10+'s elapsed';
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+falKey}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+falKey}});
+        const rd=await rr.json();
+        // Extract video URL — handle multiple response formats
+        const videoUrl=rd.video?.url||rd.videos?.[0]?.url||rd.output?.video||rd.url||rd.video_url||'';
+        if(!videoUrl)throw new Error('No video URL in response: '+JSON.stringify(rd).substring(0,120));
+        if(!S.vqgResults)S.vqgResults=[];
+        S.vqgResults.unshift({id:gid('v'),url:videoUrl,prompt:enriched,model:modelId.split('/').pop(),dur,ts:new Date().toISOString()});
+        render();toast('Video ready!','ok');
+        return;
+      }
+      if(ds.status==='FAILED')throw new Error('Generation failed: '+(ds.error||''));
+    }
+    throw new Error('Timeout — try a shorter duration or different model');
+  }catch(e){toast('Video generation failed: '+e.message,'err');console.error('[vid]',e);}
+  finally{aiEnd();if(btn){btn.textContent='\u25ba Generate Video';btn.disabled=false;}if(status)status.style.display='none';}
+}
+// ── END VIDEO GEN ─────────────────────────────────────────────────────────
 
 function loadI2IImage(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.i2iPreview=e.target.result;S.i2iImageData=e.target.result;render();};reader.readAsDataURL(file);}
 function loadStyleRef(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.styleRefPreview=e.target.result;S.styleRefData=e.target.result;render();};reader.readAsDataURL(file);}
@@ -8036,7 +8341,9 @@ async function falImg(prompt){
   if(!r.ok){const t=await r.text();throw new Error(`fal ${r.status}: ${t.substring(0,80)}`)}
   const d=await r.json();if(!d.request_id)throw new Error('No request_id');
   const statusUrl=d.status_url||`https://queue.fal.run/${model}/requests/${d.request_id}/status`;const responseUrl=d.response_url||`https://queue.fal.run/${model}/requests/${d.request_id}`;
-  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb){aiEnd();throw new Error('Stopped');}const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){aiEnd();const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url;if(!u)throw new Error('No image URL');return u}if(ds.status==='FAILED'){aiEnd();throw new Error('fal generation failed');}}aiEnd();throw new Error('Timeout');
+  for(let i=0;i<120;i++){await sleep(2200);if(S.stopSb){aiEnd();throw new Error('Stopped');}const rs=await falFetch(statusUrl,{headers:{'Authorization':`Key ${k}`}});const ds=await rs.json();if(ds.status==='COMPLETED'){aiEnd();const rr=await falFetch(responseUrl,{headers:{'Authorization':`Key ${k}`}});const rd=await rr.json();const u=rd.images?.[0]?.url||rd.image?.url||rd.output?.[0]||rd.output||rd.url||'';
+      if(!u)throw new Error('No image URL — response: '+JSON.stringify(rd).substring(0,120));
+      return u}if(ds.status==='FAILED'){aiEnd();throw new Error('fal generation failed: '+(ds.error||''));}}aiEnd();throw new Error('Timeout');
 }
 async function falImgI2I(imgUrl,prompt,strength){
   // FLUX img2img for multi-angle generation — preserves identity, changes angle
