@@ -3385,20 +3385,24 @@ Return ONLY valid JSON:
       DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:`I'd be happy to help with that project. Could you share a few more details — target audience, key message, and where it will run?`,ts:new Date().toISOString()});
     }
   } else {
-    // Regular PM response
-    try{
-      const mem=DB.getPMMemory(pmId,clientId);
-      const recentChats=DB.getPMChats(clientId).slice(-6).map(c=>`${c.role==='client'?'Client':'PM'}: ${c.text}`).join('\n');
-      const r=await callClaude(
-        `You are ${pm.name}, an AI Project Manager specialising in ${pm.domain}. You know this brand well. Keep responses concise, professional, and helpful. Max 2-3 sentences.${mem.brandNotes?'\n\nBrand notes: '+mem.brandNotes:''}`,
-        `Recent conversation:\n${recentChats}\n\nClient: ${text}`,
-        300
-      );
-      DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:r.trim(),ts:new Date().toISOString()});
-    }catch(e){
-      DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:`Thanks for your message. I'll look into this and get back to you shortly.`,ts:new Date().toISOString()});
+      // Regular PM response — AI PM Intelligence Stack (3-layer)
+      try{
+        const {data: _projRows} = await supabase.from('studio_projects').select('data');
+        const _clientProjs = (_projRows||[]).map(r=>r.data).filter(d=>d?.clientId===clientId);
+        const _activeProj = _clientProjs.find(d=>d?.workflowStatus!=='complete') || _clientProjs[0];
+        const _projectId = _activeProj?.id || null;
+
+        const _recentChats = DB.getPMChats(clientId).slice(-6).map(m=>({
+          role: m.role==='pm'?'assistant':'user',
+          content: m.text||''
+        }));
+
+        const r = await sendAIPMMessage(_projectId, clientId, text, _recentChats);
+        DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:r});
+      }catch(e){
+        DB.savePMChat({id:gid('msg'),clientId,pmId,role:'pm',text:'I ran into a technical issue. Please try again in a moment.'});
+      }
     }
-  }
   render();
   // Scroll chat to bottom
   setTimeout(()=>{const el=document.getElementById('pm-chat-thread');if(el)el.scrollTop=el.scrollHeight;},100);
