@@ -127,9 +127,9 @@ const WRITER_TYPES=[
 ];
 const VIDEO_MODELS=[
   {id:'fal-ai/veo3',n:'Google Veo 3',s:'Dialogue, humans, cinematic',tags:['dialogue','cinematic','recommended'],c:'~$0.50–1.00/shot'},
-  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master',s:'Consistency, vehicles, stylized',tags:['consistency'],c:'~$0.20–0.40'},
-  {id:'fal-ai/kling-video/v2.5/master/image-to-video',n:'Kling 2.5 Turbo',s:'Faster Kling, high quality',tags:['fast','consistency'],c:'~$0.15–0.30'},
-  {id:'fal-ai/minimax/video-01-live',n:'Minimax Hailuo 02',s:'Fast, action, dynamic motion',tags:['fast','action'],c:'~$0.10–0.20'},
+  {id:'fal-ai/kling-video/v3/pro/image-to-video',n:'Kling 3.0 Pro',s:'Latest — native audio, character consistency',tags:['consistency','new'],c:'~$0.90/5s'},
+  {id:'fal-ai/kling-video/v3/standard/image-to-video',n:'Kling 3.0 Standard',s:'Faster/cheaper Kling 3.0',tags:['fast','new'],c:'~$0.45/5s'},
+  {id:'fal-ai/minimax/hailuo-02/pro/image-to-video',n:'Hailuo 2.3 Pro',s:'1080p — best physics, ranked #2 globally',tags:['fast','action','new'],c:'~$0.49/gen'},
   {id:'fal-ai/runway-gen4/image-to-video',n:'Runway Gen-4',s:'Premium tracking, commercial',tags:['tracking','premium'],c:'~$0.80–1.20'},
   {id:'fal-ai/wan-2.1/image-to-video',n:'Wan 2.1',s:'Flexible, budget-friendly',tags:['budget'],c:'~$0.05–0.15'},
   {id:'fal-ai/wan-2.2/image-to-video',n:'Wan 2.2',s:'Improved Wan, better motion',tags:['budget','motion'],c:'~$0.06–0.18'},
@@ -2264,13 +2264,15 @@ const INTEGRATION_PRESETS=[
   {cat:'Image',name:'Ideogram V2 (fal.ai)',url:'https://queue.fal.run/fal-ai/ideogram/v2',keyHint:'fal-key-...'},
   {cat:'Image',name:'ComfyUI (fal.ai)',url:'https://queue.fal.run/fal-ai/comfyui',keyHint:'fal-key-...'},
   {cat:'Video',name:'Google Veo 3 (fal.ai)',url:'https://queue.fal.run/fal-ai/veo3',keyHint:'fal-key-...'},
-  {cat:'Video',name:'Kling 2.1 Master (fal.ai)',url:'https://queue.fal.run/fal-ai/kling-video/v2.1/master/image-to-video',keyHint:'fal-key-...'},
+  {cat:'Video',name:'Kling 3.0 Pro (fal.ai)',url:'https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video',keyHint:'fal-key-...'},
+  {cat:'Video',name:'Hailuo 2.3 Pro (fal.ai)',url:'https://queue.fal.run/fal-ai/minimax/hailuo-02/pro/image-to-video',keyHint:'fal-key-...'},
   {cat:'Video',name:'Minimax Hailuo (fal.ai)',url:'https://queue.fal.run/fal-ai/minimax/video-01-live',keyHint:'fal-key-...'},
   {cat:'Video',name:'Runway Gen-4 (fal.ai)',url:'https://queue.fal.run/fal-ai/runway-gen4/image-to-video',keyHint:'fal-key-...'},
   {cat:'Video',name:'Wan 2.1 (fal.ai)',url:'https://queue.fal.run/fal-ai/wan-2.1/image-to-video',keyHint:'fal-key-...'},
   {cat:'Video',name:'Luma Dream Machine',url:'https://api.lumalabs.ai/dream-machine/v1',keyHint:'luma-key-...'},
   {cat:'Video',name:'Nano Banana',url:'https://api.nanobanana.ai/v1',keyHint:'nb-key-...'},
-  {cat:'Audio',name:'ElevenLabs TTS',url:'https://api.elevenlabs.io/v1/text-to-speech',keyHint:'el-api-key...'},
+  {cat:'Audio',name:'ElevenLabs v3 (Latest)',url:'https://api.elevenlabs.io/v1/text-to-speech',keyHint:'el-api-key...'},
+  {cat:'Audio',name:'ElevenLabs v3 via fal.ai',url:'https://queue.fal.run/fal-ai/elevenlabs/tts/eleven-v3',keyHint:'fal-key-...'},
   {cat:'Audio',name:'ElevenLabs SFX',url:'https://api.elevenlabs.io/v1/sound-generation',keyHint:'el-api-key...'},
   {cat:'AI',name:'Anthropic Claude',url:'https://api.anthropic.com/v1/messages',keyHint:'sk-ant-...'},
   {cat:'AI',name:'OpenAI GPT-4o',url:'https://api.openai.com/v1/chat/completions',keyHint:'sk-...'},
@@ -4343,15 +4345,26 @@ function loadStyleRef(input){const file=input.files[0];if(!file)return;const rea
 // VIDEO GENERATION PAGE — Auto / Cinema Mode
 // ════════════════════════════════════════════════════════════
 const QG_VID_MODELS=[
-  {id:'fal-ai/kling-video/v2.1/master/text-to-video',n:'Kling 2.1 Master',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Premium cinematic T2V',cost:'~₹10 credits/5s'},
-  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master (I2V)',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Image to cinematic video',cost:'~₹10 credits/5s'},
-  {id:'fal-ai/minimax/video-01-live',n:'Minimax Hailuo',mode:['t2v','i2v'],dur:[6],ratio:['16:9','9:16','1:1'],desc:'Fast, high quality',cost:'~$0.49/gen'},
-  {id:'fal-ai/runway-gen4/turbo/image-to-video',n:'Runway Gen-4 Turbo',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16'],desc:'Hollywood-grade I2V',cost:'~$0.05/s'},
-  {id:'fal-ai/wan-2.1/text-to-video',n:'Wan 2.1 T2V',mode:['t2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source powerhouse',cost:'~$0.20/5s'},
-  {id:'fal-ai/wan-2.1/image-to-video',n:'Wan 2.1 I2V',mode:['i2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source I2V',cost:'~$0.20/5s'},
-  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',mode:['t2v','i2v'],dur:[5,9],ratio:['16:9','9:16','1:1'],desc:'Fast, creative motion',cost:'~$0.30/5s'},
+  // ── Kling 3.0 (Latest — March 2026) ─────────────────────────────────────
+  {id:'fal-ai/kling-video/v3/pro/text-to-video',n:'Kling 3.0 Pro',mode:['t2v'],dur:[5,10,15],ratio:['16:9','9:16','1:1'],desc:'Latest — native audio, multi-shot, cinematic',cost:'~$0.90/5s',badge:'NEW'},
+  {id:'fal-ai/kling-video/v3/pro/image-to-video',n:'Kling 3.0 Pro (I2V)',mode:['i2v'],dur:[5,10,15],ratio:['16:9','9:16','1:1'],desc:'Latest I2V — native audio + character consistency',cost:'~$0.90/5s',badge:'NEW'},
+  {id:'fal-ai/kling-video/v3/standard/text-to-video',n:'Kling 3.0 Standard',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Faster/cheaper Kling 3.0',cost:'~$0.45/5s',badge:'NEW'},
+  // ── MiniMax Hailuo 2.3 (October 2025) ────────────────────────────────────
+  {id:'fal-ai/minimax/hailuo-02/pro/text-to-video',n:'Hailuo 2.3 Pro',mode:['t2v'],dur:[6,10],ratio:['16:9','9:16'],desc:'1080p — cinematic camera control, ranked #2 globally',cost:'~$0.49/gen',badge:'NEW'},
+  {id:'fal-ai/minimax/hailuo-02/pro/image-to-video',n:'Hailuo 2.3 Pro (I2V)',mode:['i2v'],dur:[6,10],ratio:['16:9','9:16'],desc:'1080p I2V — best physics simulation',cost:'~$0.49/gen',badge:'NEW'},
+  {id:'fal-ai/minimax/hailuo-02/standard/text-to-video',n:'Hailuo 2.3 Standard',mode:['t2v'],dur:[6],ratio:['16:9','9:16'],desc:'768p — faster, cost-efficient',cost:'~$0.25/gen'},
+  // ── Runway Gen-4 ──────────────────────────────────────────────────────────
+  {id:'fal-ai/runway-gen4/turbo/image-to-video',n:'Runway Gen-4 Turbo',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16'],desc:'Hollywood-grade tracking + commercial quality',cost:'~$0.05/s'},
+  // ── Wan 2.2 (upgraded from 2.1) ───────────────────────────────────────────
+  {id:'fal-ai/wan-2.2/text-to-video',n:'Wan 2.2 T2V',mode:['t2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Improved motion, open source',cost:'~$0.18/5s',badge:'UPDATED'},
+  {id:'fal-ai/wan-2.2/image-to-video',n:'Wan 2.2 I2V',mode:['i2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Better motion than Wan 2.1',cost:'~$0.18/5s',badge:'UPDATED'},
+  // ── Google Veo 3 ──────────────────────────────────────────────────────────
   {id:'fal-ai/veo3',n:'Google Veo 3',mode:['t2v'],dur:[8],ratio:['16:9'],desc:'State-of-art + native audio',cost:'~$0.75/gen'},
-  {id:'fal-ai/cogvideox-5b',n:'CogVideoX 5B',mode:['t2v'],dur:[6],ratio:['16:9'],desc:'Open source quality',cost:'~$0.10/gen'},
+  // ── Luma Ray 2 ────────────────────────────────────────────────────────────
+  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',mode:['t2v','i2v'],dur:[5,9],ratio:['16:9','9:16','1:1'],desc:'Fast, physics-based motion',cost:'~$0.30/5s'},
+  // ── Legacy (still functional) ─────────────────────────────────────────────
+  {id:'fal-ai/kling-video/v2.1/master/text-to-video',n:'Kling 2.1 Master',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Previous gen — stable & reliable',cost:'~$0.40/5s'},
+  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master (I2V)',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Previous gen I2V',cost:'~$0.40/5s'},
 ];
 
 const CIN={
@@ -4497,7 +4510,8 @@ ${cinMode?`<div style="background:linear-gradient(135deg,rgba(139,92,246,0.06),r
       <select id="vid-model" onchange="S.vqgModel=this.value;render()" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
         ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
       </select>
-      <div style="display:flex;gap:6px;margin-top:3px;align-items:center"><span style="font-size:8px;color:#3a3a55">${selModel.desc||''}</span>${selModel.cost?`<span style="font-size:8px;color:#F59E0B;font-weight:600;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px">${selModel.cost}</span>`:''}</div>
+      <div style="display:flex;gap:6px;margin-top:3px;align-items:center"><span style="font-size:8px;color:#3a3a55">${selModel.desc||''}</span>${selModel.cost?`<span style="font-size:8px;color:#F59E0B;font-weight:600;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px">${selModel.cost}</span>
+          ${selModel.badge?`<span style="font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(16,185,129,0.15);color:#10B981">${selModel.badge}</span>`:''}`:''}</div>
     </div>
     <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Duration</label>
       <select id="vid-dur" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
@@ -4634,12 +4648,16 @@ async function runVideoGen(){
 // SOUND STUDIO PAGE
 // ════════════════════════════════════════════════════════════
 const QG_TTS_MODELS=[
-  {id:'fal-ai/elevenlabs/tts/multilingual-v2',n:'ElevenLabs Multilingual v2',desc:'29 languages, ultra-natural',feature:'voice_id'},
-  {id:'fal-ai/elevenlabs/tts/turbo-v2.5',n:'ElevenLabs Turbo v2.5',desc:'32 languages, low-latency',feature:'voice_id'},
-  {id:'fal-ai/minimax/speech-02-hd',n:'MiniMax Speech-02 HD',desc:'300+ voices, 30+ languages',feature:'minimax'},
-  {id:'fal-ai/kokoro',n:'Kokoro TTS',desc:'Fast, cost-efficient',feature:'voice'},
-  {id:'fal-ai/f5-tts',n:'F5-TTS Voice Clone',desc:'Clone any voice from audio',feature:'clone'},
-  {id:'fal-ai/resemble-ai/chatterbox',n:'Chatterbox',desc:'Expressive, personality-driven',feature:'clone'},
+  // ── ElevenLabs v3 (Latest — June 2025) ────────────────────────────────────
+  {id:'fal-ai/elevenlabs/tts/eleven-v3',n:'ElevenLabs v3',desc:'Most expressive — emotional tags, audio events, 70+ languages',feature:'voice_id',badge:'NEW'},
+  {id:'fal-ai/elevenlabs/tts/turbo-v2.5',n:'ElevenLabs Turbo v2.5',desc:'Fastest ElevenLabs — 32 languages, real-time',feature:'voice_id'},
+  {id:'fal-ai/elevenlabs/tts/multilingual-v2',n:'ElevenLabs Multilingual v2',desc:'29 languages, ultra-natural, stable',feature:'voice_id'},
+  // ── MiniMax ────────────────────────────────────────────────────────────────
+  {id:'fal-ai/minimax/speech-02-hd',n:'MiniMax Speech-02 HD',desc:'300+ voices, 30+ languages, emotional control',feature:'minimax'},
+  // ── Open source / budget ──────────────────────────────────────────────────
+  {id:'fal-ai/kokoro',n:'Kokoro TTS',desc:'Fastest, cheapest — $0.02/1K chars',feature:'voice'},
+  {id:'fal-ai/f5-tts',n:'F5-TTS Voice Clone',desc:'Clone any voice from 10s audio sample',feature:'clone'},
+  {id:'fal-ai/resemble-ai/chatterbox',n:'Chatterbox',desc:'Expressive, personality-driven, memes & games',feature:'clone'},
 ];
 const EL_VOICES=[{id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel — Calm, narrative'},{id:'9BWtsMINqrJLrRacOk9x',n:'Aria — Warm, conversational'},{id:'EXAVITQu4vr4xnSDxMaL',n:'Sarah — Soft, expressive'},{id:'TxGEqnHWrfWFTfGW9XjX',n:'Josh — Deep, authoritative'},{id:'ErXwobaYiN019PkySvjV',n:'Antoni — Warm, friendly'},{id:'pNInz6obpgDQGcFmaJgB',n:'Adam — Authoritative M'},{id:'onwK4e9ZLuTAKqWW03F9',n:'Daniel — British M'}];
 
@@ -4786,7 +4804,7 @@ function motionGenPage(){
   ${mMode==='transition'?`<div class="fg" style="margin-bottom:12px"><label>Image 2 (End Frame)</label><div onclick="document.getElementById('mq-img2').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:${S.mqgImg2?'8px':'18px'};text-align:center;cursor:pointer">${S.mqgImg2?`<img src="${S.mqgImg2}" style="max-height:80px;border-radius:4px">`:`<div style="font-size:9px;color:#6B6B8A">Upload end frame image</div>`}</div><input type="file" id="mq-img2" accept="image/*" style="display:none" onchange="loadMqImg2(this)"></div>`:''}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
     <div class="fg"><label>Duration</label><select id="mq-dur"><option value="3">3s</option><option value="5" selected>5s</option><option value="8">8s</option><option value="10">10s</option></select></div>
-    ${mMode==='effect'?`<div class="fg"><label>Effect Type</label><select id="mq-effect"><option value="zoom_in">Zoom In</option><option value="zoom_out">Zoom Out</option><option value="rotate">Rotate</option><option value="glitch">Glitch</option><option value="cinematic">Cinematic</option><option value="slow_motion">Slow Motion</option><option value="explosion">Explosion</option></select></div>`:`<div class="fg"><label>Model</label><select id="mq-model"><option value="fal-ai/kling-video/v2.1/master/image-to-video">Kling 2.1</option><option value="fal-ai/luma-dream-machine/ray-2-flash">Luma Ray 2</option><option value="fal-ai/wan-2.1/image-to-video">Wan 2.1</option></select></div>`}
+    ${mMode==='effect'?`<div class="fg"><label>Effect Type</label><select id="mq-effect"><option value="zoom_in">Zoom In</option><option value="zoom_out">Zoom Out</option><option value="rotate">Rotate</option><option value="glitch">Glitch</option><option value="cinematic">Cinematic</option><option value="slow_motion">Slow Motion</option><option value="explosion">Explosion</option></select></div>`:`<div class="fg"><label>Model</label><select id="mq-model"><option value="fal-ai/kling-video/v3/pro/image-to-video">Kling 3.0 Pro ✦ NEW</option><option value="fal-ai/kling-video/v3/standard/image-to-video">Kling 3.0 Standard</option><option value="fal-ai/minimax/hailuo-02/pro/image-to-video">Hailuo 2.3 Pro ✦ NEW</option><option value="fal-ai/luma-dream-machine/ray-2-flash">Luma Ray 2</option><option value="fal-ai/wan-2.2/image-to-video">Wan 2.2</option></select></div>`}
   </div>
   <button id="mq-gen-btn" onclick="runMotionGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#F59E0B,#FF6B35);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#9889; Generate Motion</button>
 </div>
