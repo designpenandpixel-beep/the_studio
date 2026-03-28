@@ -769,7 +769,12 @@ async function doLogin(){
       if(d.forcePasswordChange){
         render();showForceChangePwModal();return;
       }
-      render();toast('Welcome, '+d.user.name+'!','ok');return;
+      render();
+      const freshUser=DB.getUser(d.user.id);
+      if(freshUser&&freshUser.firstLogin&&freshUser.role==='creator'){
+        setTimeout(()=>showCreatorOnboarding(),300);return;
+      }
+      toast('Welcome back, '+d.user.name+'!','ok');return;
     }
     if(d.fallback){
       // Server auth not configured — fall through to client-side
@@ -796,7 +801,9 @@ async function doLogin(){
   _loginAttempts=0;_loginLockUntil=0;
   S.session={userId:u.id,role:u.role,name:u.name};DB.setSession(S.session);S.view=u.role;S.tab='dashboard';
   if(u.password==='admin123'&&u.role==='admin'){render();showForceChangePwModal();return;}
-  render();toast('Welcome, '+u.name+'!','ok');
+  render();
+  if(u.firstLogin&&u.role==='creator'){setTimeout(()=>showCreatorOnboarding(),300);return;}
+  toast('Welcome back, '+u.name+'!','ok');
 }
 
 function showForceChangePwModal(){
@@ -1802,6 +1809,395 @@ function adminClients(){
 </div></div>`;
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// CREATOR ONBOARDING SYSTEM
+// ══════════════════════════════════════════════════════════════════
+
+const CREATOR_SKILLS = [
+  'Video Production','Photography','Motion Graphics','3D Modelling',
+  'Animation','Copywriting','Social Media','Brand Design',
+  'Audio Production','Post Production','AI Generation','Illustration'
+];
+const CREATOR_TOOLS = [
+  'Premiere Pro','After Effects','DaVinci Resolve','Final Cut Pro',
+  'Blender','Cinema 4D','Figma','Photoshop','Lightroom',
+  'Midjourney','Runway','fal.ai','ElevenLabs'
+];
+
+// ── Credential Modal (shown after admin creates a creator) ────────
+function showCreatorCredentialsModal(u, username, pw){
+  const name = u?.name || username || 'Creator';
+  const user = u?.id ? DB.getUser(u.id) : null;
+  const finalPw = pw || user?.password || 'temp123';
+  const finalUser = username || u?.username || name.toLowerCase().replace(/\s+/g,'.');
+  const loginUrl = window.location.origin;
+  const credText = `Your CinexAI Creator account is ready!\n\nLogin URL: ${loginUrl}\nUsername: ${finalUser}\nPassword: ${finalPw}\n\nYou'll be prompted to set a new password on first login.\nKeep this message safe — your admin won't be able to resend it.`;
+  openModal(`<div class="modal-title">🎉 Creator Account Created</div>
+<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:16px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <div style="width:36px;height:36px;border-radius:50%;background:rgba(16,185,129,0.15);display:flex;align-items:center;justify-content:center;font-size:16px">✦</div>
+    <div><div style="font-size:13px;font-weight:700;color:#F0F0FF">${esc(name)}</div>
+    <div style="font-size:10px;color:#6B6B8A">Creator account ready to share</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+    <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px">
+      <div style="font-size:9px;color:#6B6B8A;text-transform:uppercase;font-weight:700;margin-bottom:4px">Username</div>
+      <div style="font-size:12px;font-weight:700;color:#06B6D4;font-family:monospace">${esc(finalUser)}</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px">
+      <div style="font-size:9px;color:#6B6B8A;text-transform:uppercase;font-weight:700;margin-bottom:4px">Temp Password</div>
+      <div style="font-size:12px;font-weight:700;color:#FF6B35;font-family:monospace">${esc(finalPw)}</div>
+    </div>
+  </div>
+  <div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:10px;font-size:10px;color:#C8C8E0;font-family:monospace;line-height:1.7;white-space:pre-wrap;margin-bottom:10px">${esc(credText)}</div>
+  <div style="display:flex;gap:8px">
+    <button onclick="navigator.clipboard.writeText(${JSON.stringify(credText)}).then(()=>toast('Credentials copied!','ok'))" 
+      class="btn btn-gold btn-sm" style="flex:1;justify-content:center">📋 Copy Credentials</button>
+    <button onclick="navigator.clipboard.writeText('${loginUrl}')" 
+      class="btn btn-ghost btn-sm">🔗 Copy Link</button>
+  </div>
+</div>
+<div style="font-size:9px;color:#6B6B8A;background:rgba(245,158,11,0.06);border-radius:6px;padding:8px">
+  ⚠️ Share these credentials securely — via WhatsApp, email, or in person. The creator will be prompted to set their own password on first login.
+</div>
+<div class="btn-row" style="margin-top:12px">
+  <button class="btn btn-ghost" onclick="closeModal()">Done</button>
+</div>`);
+}
+
+// ── Onboarding Checklist Widget (shown on creator dashboard until complete) ──
+function creatorOnboardChecklist(u){
+  if(!u||u.onboarded)return '';
+  const steps = [
+    {id:'pw', label:'Change your password', done: u.password_changed===true, action:"showCreatorOnboarding(1)"},
+    {id:'profile', label:'Add your bio & photo', done: !!(u.bio&&u.bio.length>5), action:"showCreatorOnboarding(2)"},
+    {id:'skills', label:'Select your skills', done: !!(u.skills&&u.skills.length>0), action:"showCreatorOnboarding(3)"},
+    {id:'tools', label:'Choose your tools', done: !!(u.tools&&u.tools.length>0), action:"showCreatorOnboarding(4)"},
+  ];
+  const done = steps.filter(s=>s.done).length;
+  const pct = Math.round((done/steps.length)*100);
+  if(done===steps.length){
+    // Auto-mark onboarded
+    const usr=DB.getUser(S.session.userId);
+    if(usr){usr.onboarded=true;usr.firstLogin=false;DB.saveUser(usr);}
+    return '';
+  }
+  return`<div style="background:linear-gradient(135deg,rgba(255,107,53,0.08),rgba(139,92,246,0.06));
+    border:1px solid rgba(255,107,53,0.2);border-radius:14px;padding:20px;margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#F0F0FF">✦ Complete your profile</div>
+        <div style="font-size:10px;color:#6B6B8A;margin-top:2px">${done}/${steps.length} steps done</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:80px;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#FF6B35,#8B5CF6);border-radius:2px;transition:width 0.4s"></div>
+        </div>
+        <span style="font-size:10px;font-weight:700;color:#FF6B35">${pct}%</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
+      ${steps.map(s=>`<button onclick="${s.action}" style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+        border-radius:8px;border:1px solid ${s.done?'rgba(16,185,129,0.3)':'rgba(255,255,255,0.08)'};
+        background:${s.done?'rgba(16,185,129,0.08)':'rgba(255,255,255,0.02)'};
+        cursor:${s.done?'default':'pointer'};text-align:left;transition:all 0.15s"
+        ${s.done?'disabled':''}>
+        <div style="width:18px;height:18px;border-radius:50%;
+          background:${s.done?'#10B981':'transparent'};
+          border:2px solid ${s.done?'#10B981':'rgba(255,255,255,0.2)'};
+          display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px">
+          ${s.done?'✓':''}
+        </div>
+        <span style="font-size:11px;font-weight:${s.done?'400':'600'};color:${s.done?'#6B6B8A':'#C8C8E0'}">${s.label}</span>
+      </button>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ── Main Onboarding Wizard Modal ──────────────────────────────────
+function showCreatorOnboarding(startStep){
+  S._obStep = startStep||0;
+  renderOnboardingStep();
+}
+
+function renderOnboardingStep(){
+  const step = S._obStep||0;
+  const u = DB.getUser(S.session.userId);
+  if(!u)return;
+
+  const steps = ['Welcome','Password','Profile','Skills & Tools','You\'re Ready'];
+  const stepBar = `<div style="display:flex;gap:4px;margin-bottom:20px">
+    ${steps.map((s,i)=>`<div style="flex:1;text-align:center">
+      <div style="height:3px;border-radius:2px;background:${i<=step?'linear-gradient(90deg,#FF6B35,#8B5CF6)':'rgba(255,255,255,0.08)'};margin-bottom:5px;transition:all 0.3s"></div>
+      <div style="font-size:8px;color:${i===step?'#FF6B35':i<step?'#10B981':'#3a3a55'};font-weight:${i===step?'700':'400'}">${s}</div>
+    </div>`).join('')}
+  </div>`;
+
+  let body = '';
+
+  if(step===0){
+    body = `<div style="text-align:center;padding:10px 0 20px">
+      <div style="font-size:40px;margin-bottom:12px">🎬</div>
+      <div style="font-size:20px;font-weight:800;color:#F0F0FF;margin-bottom:8px">Welcome to CinexAI, ${esc(u.name.split(' ')[0])}!</div>
+      <div style="font-size:13px;color:#6B6B8A;line-height:1.6;max-width:360px;margin:0 auto">
+        You've been added as a Creator. Let's take 2 minutes to set up your profile so clients and your PM know exactly who they're working with.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:20px;text-align:left">
+        ${[['🔐','Secure Password','Your own credentials, your privacy'],
+           ['👤','Your Profile','Bio, photo, specialisations'],
+           ['🛠','Your Tools','So your PM knows your stack']].map(([ico,t,d])=>`
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px">
+            <div style="font-size:18px;margin-bottom:6px">${ico}</div>
+            <div style="font-size:11px;font-weight:700;color:#C8C8E0;margin-bottom:3px">${t}</div>
+            <div style="font-size:9px;color:#6B6B8A">${d}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <button onclick="S._obStep=1;renderOnboardingStep()" 
+      style="width:100%;padding:13px;border-radius:10px;border:none;
+      background:linear-gradient(135deg,#FF6B35,#8B5CF6);color:#fff;font-size:14px;font-weight:700;cursor:pointer">
+      Let's Get Started →
+    </button>`;
+  }
+
+  else if(step===1){
+    body = `<div style="margin-bottom:6px">
+      <div style="font-size:16px;font-weight:700;color:#F0F0FF;margin-bottom:4px">🔐 Set your password</div>
+      <div style="font-size:11px;color:#6B6B8A;margin-bottom:16px">Choose something strong that you'll remember. You'll use this every time you log in.</div>
+      <div class="fg" style="margin-bottom:10px">
+        <label>New Password</label>
+        <input type="password" id="ob-pw1" placeholder="Min 8 characters" 
+          style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1)"
+          oninput="document.getElementById('ob-pw-strength').textContent=obPwStrength(this.value)"/>
+        <div id="ob-pw-strength" style="font-size:9px;margin-top:4px;color:#6B6B8A"></div>
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label>Confirm Password</label>
+        <input type="password" id="ob-pw2" placeholder="Repeat your new password"
+          style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1)"/>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="S._obStep=0;renderOnboardingStep()" class="btn btn-ghost" style="padding:11px 20px">← Back</button>
+      <button onclick="obSavePassword()" 
+        style="flex:1;padding:12px;border-radius:10px;border:none;
+        background:linear-gradient(135deg,#FF6B35,#8B5CF6);color:#fff;font-size:13px;font-weight:700;cursor:pointer">
+        Save Password & Continue →
+      </button>
+    </div>`;
+  }
+
+  else if(step===2){
+    body = `<div>
+      <div style="font-size:16px;font-weight:700;color:#F0F0FF;margin-bottom:4px">👤 Your profile</div>
+      <div style="font-size:11px;color:#6B6B8A;margin-bottom:16px">Clients and your AI PM use this to understand your working style.</div>
+      <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px">
+        <div onclick="document.getElementById('ob-photo').click()" id="ob-photo-preview"
+          style="width:56px;height:56px;border-radius:50%;background:rgba(255,107,53,0.1);
+          border:2px dashed rgba(255,107,53,0.3);display:flex;align-items:center;justify-content:center;
+          font-size:22px;cursor:pointer;flex-shrink:0;overflow:hidden">
+          ${u.photoUrl?`<img src="${esc(u.photoUrl)}" style="width:100%;height:100%;object-fit:cover">`:'📷'}
+        </div>
+        <div style="flex:1">
+          <div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:4px">Profile Photo</div>
+          <div style="font-size:9px;color:#6B6B8A;margin-bottom:6px">Shown on project cards and your PM's view</div>
+          <button onclick="document.getElementById('ob-photo').click()" 
+            class="btn btn-ghost btn-sm" style="font-size:9px">Upload Photo</button>
+        </div>
+      </div>
+      <input type="file" id="ob-photo" accept="image/*" style="display:none" onchange="obLoadPhoto(this)">
+      <div class="fg" style="margin-bottom:10px">
+        <label>Bio <span style="font-size:9px;color:#6B6B8A;font-weight:400">— 1-2 sentences about your work</span></label>
+        <textarea id="ob-bio" rows="3" placeholder="e.g. I'm a cinematographer and editor specialising in brand films and social content. Based in Mumbai."
+          style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;
+          color:#C8C8E0;padding:10px;font-size:11px;resize:none;box-sizing:border-box;font-family:inherit">${u.bio||''}</textarea>
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label>Phone / WhatsApp</label>
+        <input type="text" id="ob-phone" value="${u.phone||''}" placeholder="+91 98765 43210"
+          style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.08)"/>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="S._obStep=1;renderOnboardingStep()" class="btn btn-ghost" style="padding:11px 20px">← Back</button>
+      <button onclick="obSaveProfile()" 
+        style="flex:1;padding:12px;border-radius:10px;border:none;
+        background:linear-gradient(135deg,#FF6B35,#8B5CF6);color:#fff;font-size:13px;font-weight:700;cursor:pointer">
+        Save & Continue →
+      </button>
+    </div>`;
+  }
+
+  else if(step===3){
+    const selSkills = u.skills||[];
+    const selTools = u.tools||[];
+    body = `<div>
+      <div style="font-size:16px;font-weight:700;color:#F0F0FF;margin-bottom:4px">🛠 Skills & Tools</div>
+      <div style="font-size:11px;color:#6B6B8A;margin-bottom:14px">Your PM uses this to match you with the right projects.</div>
+      <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:8px">Skills</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px" id="ob-skills-wrap">
+        ${CREATOR_SKILLS.map(s=>`<button onclick="obToggleTag(this,'ob-skills-wrap')"
+          data-val="${s}"
+          style="font-size:10px;padding:5px 12px;border-radius:16px;cursor:pointer;transition:all 0.15s;
+          border:1px solid ${selSkills.includes(s)?'#FF6B35':'rgba(255,255,255,0.1)'};
+          background:${selSkills.includes(s)?'rgba(255,107,53,0.15)':'rgba(255,255,255,0.02)'};
+          color:${selSkills.includes(s)?'#FF6B35':'#6B6B8A'}">${s}</button>`).join('')}
+      </div>
+      <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:8px">Tools</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px" id="ob-tools-wrap">
+        ${CREATOR_TOOLS.map(t=>`<button onclick="obToggleTag(this,'ob-tools-wrap')"
+          data-val="${t}"
+          style="font-size:10px;padding:5px 12px;border-radius:16px;cursor:pointer;transition:all 0.15s;
+          border:1px solid ${selTools.includes(t)?'#8B5CF6':'rgba(255,255,255,0.1)'};
+          background:${selTools.includes(t)?'rgba(139,92,246,0.15)':'rgba(255,255,255,0.02)'};
+          color:${selTools.includes(t)?'#8B5CF6':'#6B6B8A'}">${t}</button>`).join('')}
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label>Availability</label>
+        <select id="ob-avail" style="background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.08)">
+          <option value="full-time" ${u.availability==='full-time'?'selected':''}>Full-time available</option>
+          <option value="part-time" ${u.availability==='part-time'?'selected':''}>Part-time / freelance</option>
+          <option value="project-basis" ${u.availability==='project-basis'?'selected':''}>Project basis only</option>
+          <option value="on-leave" ${u.availability==='on-leave'?'selected':''}>Currently on leave</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="S._obStep=2;renderOnboardingStep()" class="btn btn-ghost" style="padding:11px 20px">← Back</button>
+      <button onclick="obSaveSkills()" 
+        style="flex:1;padding:12px;border-radius:10px;border:none;
+        background:linear-gradient(135deg,#FF6B35,#8B5CF6);color:#fff;font-size:13px;font-weight:700;cursor:pointer">
+        Save & Continue →
+      </button>
+    </div>`;
+  }
+
+  else if(step===4){
+    const u2 = DB.getUser(S.session.userId);
+    body = `<div style="text-align:center;padding:10px 0 20px">
+      <div style="font-size:48px;margin-bottom:12px">🎉</div>
+      <div style="font-size:20px;font-weight:800;color:#F0F0FF;margin-bottom:8px">You're all set, ${esc((u2?.name||u.name).split(' ')[0])}!</div>
+      <div style="font-size:12px;color:#6B6B8A;line-height:1.6;margin-bottom:20px">
+        Your profile is complete. Your AI PM now has everything it needs to guide you through projects.
+      </div>
+      <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:16px;text-align:left;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:#10B981;margin-bottom:10px">✓ Profile Complete</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px;color:#C8C8E0">
+          <div>👤 Bio added</div>
+          <div>🔐 Password secured</div>
+          <div>🛠 ${(u2?.skills||[]).length} skills selected</div>
+          <div>⚡ ${(u2?.tools||[]).length} tools listed</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#6B6B8A;margin-bottom:16px">
+        Your AI PM will brief you on your first project. Check your dashboard for any pending tasks.
+      </div>
+    </div>
+    <button onclick="obComplete()" 
+      style="width:100%;padding:13px;border-radius:10px;border:none;
+      background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:14px;font-weight:700;cursor:pointer">
+      Go to Dashboard →
+    </button>`;
+  }
+
+  openModal(`<div style="max-width:480px">
+    <div style="font-size:11px;font-weight:700;color:#FF6B35;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px">Getting Started</div>
+    ${stepBar}
+    ${body}
+  </div>`, true);
+}
+
+// ── Onboarding helper functions ───────────────────────────────────
+function obPwStrength(pw){
+  if(!pw)return '';
+  if(pw.length<6)return '⚠️ Too short';
+  if(pw.length<8)return '🔶 Weak';
+  const has = [/[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(r=>r.test(pw)).length;
+  if(has===0)return '🔶 Add numbers or symbols';
+  if(has===1)return '🟡 Fair';
+  if(has===2)return '🟢 Good';
+  return '✅ Strong';
+}
+
+function obLoadPhoto(input){
+  const f=input.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const prev=document.getElementById('ob-photo-preview');
+    if(prev)prev.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
+    window._obPhotoData=e.target.result;
+  };
+  r.readAsDataURL(f);
+}
+
+function obToggleTag(btn, wrapId){
+  const isOn = btn.style.color !== 'rgb(107, 107, 138)' && btn.style.background !== 'rgba(255, 255, 255, 0.02)';
+  const accent = wrapId.includes('skills') ? '#FF6B35' : '#8B5CF6';
+  const accentBg = wrapId.includes('skills') ? 'rgba(255,107,53,0.15)' : 'rgba(139,92,246,0.15)';
+  if(isOn){
+    btn.style.color='#6B6B8A';btn.style.background='rgba(255,255,255,0.02)';btn.style.borderColor='rgba(255,255,255,0.1)';
+  } else {
+    btn.style.color=accent;btn.style.background=accentBg;btn.style.borderColor=accent;
+  }
+}
+
+function _obGetSelected(wrapId){
+  return [...(document.getElementById(wrapId)?.querySelectorAll('button')||[])]
+    .filter(b=>b.style.color!=='rgb(107, 107, 138)'&&b.style.background!=='rgba(255, 255, 255, 0.02)')
+    .map(b=>b.dataset.val).filter(Boolean);
+}
+
+function obSavePassword(){
+  const pw1=document.getElementById('ob-pw1')?.value;
+  const pw2=document.getElementById('ob-pw2')?.value;
+  if(!pw1||pw1.length<6){toast('Password must be at least 6 characters','err');return;}
+  if(pw1!==pw2){toast('Passwords do not match','err');return;}
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  u.password=pw1;u.password_changed=true;u.firstLogin=false;
+  DB.saveUser(u);
+  toast('Password saved','ok');
+  S._obStep=2;renderOnboardingStep();
+}
+
+function obSaveProfile(){
+  const bio=document.getElementById('ob-bio')?.value?.trim()||'';
+  const phone=document.getElementById('ob-phone')?.value?.trim()||'';
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  u.bio=bio;u.phone=phone;
+  if(window._obPhotoData){u.photoUrl=window._obPhotoData;window._obPhotoData=null;}
+  DB.saveUser(u);toast('Profile saved','ok');
+  S._obStep=3;renderOnboardingStep();
+}
+
+function obSaveSkills(){
+  const skills=_obGetSelected('ob-skills-wrap');
+  const tools=_obGetSelected('ob-tools-wrap');
+  const avail=document.getElementById('ob-avail')?.value||'full-time';
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  u.skills=skills;u.tools=tools;u.availability=avail;
+  DB.saveUser(u);toast('Skills saved','ok');
+  S._obStep=4;renderOnboardingStep();
+}
+
+function obComplete(){
+  const u=DB.getUser(S.session.userId);if(!u)return;
+  u.onboarded=true;u.firstLogin=false;
+  DB.saveUser(u);closeModal();render();
+  toast('Welcome to CinexAI! 🎬','ok');
+}
+
+function toggleSpecTag(skill, btn){
+  const isOn = btn.style.background === 'rgba(255, 107, 53, 0.15)';
+  if(isOn){
+    btn.style.background='transparent';btn.style.color='var(--t4)';btn.style.borderColor='rgba(255,255,255,0.12)';
+  } else {
+    btn.style.background='rgba(255,107,53,0.15)';btn.style.color='#FF6B35';btn.style.borderColor='#FF6B3566';
+  }
+}
+
+// ══ END CREATOR ONBOARDING ════════════════════════════════════════
+
 function adminCreators(){
   const emps=DB.getUsers().filter(u=>u.role==='creator');
   const ps=DB.getProjects();
@@ -1830,6 +2226,7 @@ ${emps.map(e=>{
     <div style="font-size:10px;color:var(--t4)">${esc(e.username||e.name)} · ${esc(e.email||'')}</div>
   </div>
   <span class="badge badge-${e.active!==false?'green':'red'}">${e.active!==false?'Active':'Inactive'}</span>
+  ${e.firstLogin?'<span style="font-size:8px;background:rgba(245,158,11,0.15);color:#F59E0B;border:1px solid rgba(245,158,11,0.3);border-radius:4px;padding:2px 7px;font-weight:700;margin-left:4px">⏳ Pending Setup</span>':''}
 </div>
 <div style="padding:14px 18px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -1846,9 +2243,12 @@ ${emps.map(e=>{
     <span>${completedProjects.length} completed</span>
   </div>
   <div style="display:flex;gap:4px">
-    <button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
+    ${e.firstLogin?`<button class="btn btn-outline btn-sm" style="width:100%;justify-content:center;margin-bottom:6px;color:#F59E0B;border-color:#F59E0B44" onclick="showCreatorCredentialsModal(${JSON.stringify({id:e.id,name:e.name,username:e.username||e.name.toLowerCase().replace(/\\s+/g,'.')}),e.username||e.name.toLowerCase().replace(/\s+/g,'.'),e.password)">📋 Copy Credentials</button>`:''}
+<div style="display:flex;gap:4px">
+<button class="btn btn-gold btn-sm" onclick="showAssignClientsModal('${e.id}')" style="flex:1;justify-content:center">Assign Clients</button>
     <button class="btn btn-ghost btn-sm" onclick="showEditUserModal('${e.id}')">Edit</button>
     <button class="btn btn-${e.active!==false?'red':'green'} btn-sm" onclick="toggleActive('${e.id}')">${e.active!==false?'Off':'On'}</button>
+</div>
   </div>
 </div></div>`;}).join('')}
 </div>`:`<div style="text-align:center;padding:48px"><div style="font-size:28px;margin-bottom:12px;opacity:0.15">✦</div><div style="font-size:12px;color:var(--t3);margin-bottom:4px">No creators yet</div><div style="font-size:10px;color:var(--t4)">Add your first creator to start assigning projects</div></div>`}
@@ -5383,7 +5783,9 @@ function creatorDashboard(){
     {k:'storyboard_in_progress',l:'In Production',cnt:wfCounts['storyboard_in_progress']||0},
     {k:'complete',l:'Complete',cnt:wfCounts['complete']||0}
   ].filter(function(b){return b.k==='all'||b.cnt>0;});
+  const onboardChecklist=creatorOnboardChecklist(u);
   return`<div class="page">
+${onboardChecklist}
 <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
 <div><div class="page-title">My Projects</div><div class="page-sub">${ps.length} assigned &middot; ${attn.length} need action</div></div>
 <div style="display:flex;gap:5px;flex-wrap:wrap">
@@ -6671,8 +7073,8 @@ ${ic?`<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
 </div>`:''}
 <div class="fg"><label>Full Name</label><input type="text" id="rn" placeholder="e.g. Priya Sharma"/></div>
 <div class="fg"><label>Email</label><input type="text" id="re" placeholder="email@company.com"/></div>
-${!ic?'<div class="fg"><label>Username (for login)</label><input type="text" id="ru" placeholder="e.g. priya.sharma"/></div>':''}
-<div class="fg"><label>Password ${ic?'(auto-generated if blank)':''}</label><input type="text" id="rp" value="${ic?gpw():''}"/></div>
+${!ic?`<div class="fg"><label>Username (for login)</label><input type="text" id="ru" placeholder="e.g. priya.sharma" oninput="document.getElementById('ru-preview').textContent=this.value||'username'"/></div>`:''}
+<div class="fg"><label>Temporary Password</label><div style="display:flex;gap:6px"><input type="text" id="rp" value="${ic?gpw():gpw()}" style="flex:1"/><button class="btn btn-ghost btn-sm" onclick="document.getElementById('rp').value=gpw()" style="white-space:nowrap;font-size:9px">↺ New</button></div><div style="font-size:9px;color:#F59E0B;margin-top:4px">Creator must change this on first login</div></div>${!ic?`<div class="fg"><label>Specialisations <span style="font-size:9px;color:var(--t4);font-weight:400">optional</span></label><div style="display:flex;gap:5px;flex-wrap:wrap" id="spec-tags">${['Video Production','Photography','Motion Graphics','3D','Animation','Copywriting','Social Media','Brand Design','Audio','Post Production'].map(s=>`<button onclick="toggleSpecTag('${s}',this)" style="font-size:9px;padding:3px 9px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:transparent;color:var(--t4);cursor:pointer">${s}</button>`).join('')}</div></div>`:''}
 ${ic?`<div class="fg"><label>Assign AI PM <span style="font-size:9px;color:var(--red);font-weight:600">* Required</span></label><select id="rpm" style="border-color:var(--b2)"><option value="">— Select a PM —</option>${pms.map(pm=>`<option value="${pm.id}">${esc(pm.name)} · ${esc(pm.domain)}</option>`).join('')}</select>${!pms.length?`<div style="font-size:9px;color:var(--red);margin-top:3px">No PMs available — create PMs from the AI PMs tab first.</div>`:''}</div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doRegister('${role}')">Register ${ic?'Client':'AI PM'}</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
@@ -6682,10 +7084,11 @@ function doRegister(role){
   const pw=document.getElementById('rp')?.value.trim()||gpw();
   const username=document.getElementById('ru')?.value.trim()||name.toLowerCase().replace(/\s+/g,'.');
   const ic=role==='client';
-  const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString()};
+  const u={id:gid('u'),role,name,email,password:pw,active:true,brandAssets:[],assignedClients:[],apiKeys:{},createdAt:new Date().toISOString(),firstLogin:true,onboarded:false,bio:'',skills:[],specialisations:[],availability:'full-time',tools:[]};
   if(ic){const pmId=document.getElementById('rpm')?.value||null;if(!pmId){toast('Please select an AI PM — it is required','err');return;}u.clientId=gcid();u.assignedPmId=pmId;const logo=window._regLogoData;if(logo){u.logoUrl=logo;window._regLogoData=null;}}else u.username=username;
   DB.saveUser(u);closeModal();render();
-  toast(`${ic?'Client':'AI PM'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
+  toast(`${ic?'Client':'Creator'} registered! Login: ${ic?u.clientId:username} / ${pw}`,'ok');
+  if(!ic)setTimeout(()=>showCreatorCredentialsModal(u,username,pw),400);
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
 }
 
