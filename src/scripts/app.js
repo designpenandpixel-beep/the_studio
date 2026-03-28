@@ -1492,6 +1492,7 @@ ${wfMiniDots(p)}
 <div style="display:flex;gap:4px">
 ${(p.comments||[]).length?`<span style="font-size:9px;color:var(--blue)">💬${p.comments.length}</span>`:''}
 <button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:9px" onclick="event.stopPropagation();openStudio('${p.id}')">Studio →</button>
+<button class="btn btn-ghost btn-sm" onclick="showPipelineModal('${p.id}')" style="font-size:10px;color:#8B5CF6;padding:5px 8px">&#9889;</button>
 </div></div></div></div>`;}).join('')}
 </div>`;
 }
@@ -1551,6 +1552,7 @@ ${{high:'<span style="font-size:9px;color:var(--red);font-weight:700">🔴 HIGH<
 </div>
 <div class="btn-row" style="margin-top:0">
 <button class="btn btn-gold" onclick="openStudio('${p.id}')">Open Studio →</button>
+<button class="btn btn-ghost btn-sm" onclick="showPipelineModal('${p.id}')" title="Project Pipeline" style="font-size:11px;color:#8B5CF6;border-color:rgba(139,92,246,0.4)">&#9889; Pipeline</button>
 <button class="btn btn-outline btn-sm" onclick="showEditProjModal('${p.id}')">Edit</button>
 <button class="btn btn-ghost btn-sm" onclick="showAssignModal('${p.id}')">Assign</button>
 <button class="btn btn-red btn-sm" onclick="if(confirm('Delete this project?')){auditLog('project_deleted','Project deleted','${p.id}');DB.deleteProject('${p.id}');S.detailPid=null;render()}">Delete</button>
@@ -2279,6 +2281,268 @@ const INTEGRATION_PRESETS=[
   {cat:'Render',name:'ComfyUI (self-hosted)',url:'http://localhost:8188/api/prompt',keyHint:'optional'},
   {cat:'3D',name:'Stable Diffusion (API)',url:'https://stablediffusionapi.com/api/v3',keyHint:'sd-key-...'},
 ];
+
+
+// ══════════════════════════════════════════════════════════════════
+// INTEGRATION PIPELINE SYSTEM
+// ══════════════════════════════════════════════════════════════════
+
+// ── Admin: Assign integrations to a project pipeline ─────────────
+function showPipelineModal(pid){
+  const p = DB.getProject(pid); if(!p) return;
+  const allIntgs = DB.getIntegrations().filter(i=>i.active);
+  const assigned = p.pipeline||[];
+  const runs = p.pipelineRuns||[];
+
+  openModal(`<div class="modal-title">⚡ Project Pipeline — ${esc(p.name)}</div>
+<div style="font-size:11px;color:#6B6B8A;margin-bottom:14px">
+  Assign active integrations to this project. The creator will see these as ready-to-use tools inside their project.
+</div>
+${!allIntgs.length ? '<div style="font-size:11px;color:#EF4444;padding:12px;background:rgba(239,68,68,0.08);border-radius:8px;margin-bottom:14px">No active integrations. Go to Integrations tab and activate some first.</div>' : ''}
+<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+  ${allIntgs.map(intg => {
+    const isAssigned = assigned.includes(intg.id);
+    return `<div style="display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border-radius:8px;
+      border:1px solid ${isAssigned?'rgba(139,92,246,0.3)':'rgba(255,255,255,0.07)'};
+      background:${isAssigned?'rgba(139,92,246,0.08)':'rgba(255,255,255,0.02)'}">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:${isAssigned?'#8B5CF6':'#C8C8E0'}">${esc(intg.name)}</div>
+        <div style="font-size:9px;color:#6B6B8A">${esc(intg.category)} · ${esc(intg.url.substring(0,40))}...</div>
+      </div>
+      <button onclick="togglePipelineIntg('${pid}','${intg.id}',this)"
+        style="padding:4px 12px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;
+        border:1px solid ${isAssigned?'#8B5CF6':'rgba(255,255,255,0.15)'};
+        background:${isAssigned?'rgba(139,92,246,0.2)':'transparent'};
+        color:${isAssigned?'#8B5CF6':'#6B6B8A'}">
+        ${isAssigned?'✓ Assigned':'+ Assign'}
+      </button>
+    </div>`;
+  }).join('')}
+</div>
+${runs.length ? `<div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;
+  letter-spacing:0.06em;margin-bottom:8px">Run History (${runs.length})</div>
+<div style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+  ${runs.slice(0,10).map(r=>`<div style="font-size:9px;color:#6B6B8A;padding:6px 10px;
+    background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);
+    display:flex;justify-content:space-between">
+    <span>${esc(r.intgName)} · ${esc(r.type||'generate')}</span>
+    <span>${new Date(r.ts).toLocaleString()}</span>
+  </div>`).join('')}
+</div>` : ''}
+<div class="btn-row" style="margin-top:14px">
+  <button class="btn btn-ghost" onclick="closeModal()">Done</button>
+</div>`);
+}
+
+function togglePipelineIntg(pid, intgId, btn){
+  const p = DB.getProject(pid); if(!p) return;
+  if(!p.pipeline) p.pipeline=[];
+  const idx = p.pipeline.indexOf(intgId);
+  if(idx>=0){
+    p.pipeline.splice(idx,1);
+    btn.textContent='+ Assign';
+    btn.style.background='transparent';
+    btn.style.color='#6B6B8A';
+    btn.style.borderColor='rgba(255,255,255,0.15)';
+    btn.parentElement.style.borderColor='rgba(255,255,255,0.07)';
+    btn.parentElement.style.background='rgba(255,255,255,0.02)';
+  } else {
+    p.pipeline.push(intgId);
+    btn.textContent='✓ Assigned';
+    btn.style.background='rgba(139,92,246,0.2)';
+    btn.style.color='#8B5CF6';
+    btn.style.borderColor='#8B5CF6';
+    btn.parentElement.style.borderColor='rgba(139,92,246,0.3)';
+    btn.parentElement.style.background='rgba(139,92,246,0.08)';
+  }
+  DB.saveProject(p);
+  toast(idx>=0?'Removed from pipeline':'Added to pipeline','ok');
+}
+
+// ── Creator: Pipeline tab inside project detail ───────────────────
+function creatorPipelineTab(p){
+  const allIntgs = DB.getIntegrations();
+  const assigned = (p.pipeline||[]).map(id=>allIntgs.find(i=>i.id===id)).filter(Boolean);
+  const runs = p.pipelineRuns||[];
+  const catAccent = {Image:'#FF6B35',Video:'#8B5CF6',Audio:'#10B981','3D':'#06B6D4',Automation:'#F59E0B',Render:'#EC4899'};
+
+  if(!assigned.length) return `<div style="text-align:center;padding:40px 20px;
+    border:1px dashed rgba(255,255,255,0.08);border-radius:12px;color:#3a3a55">
+    <div style="font-size:32px;margin-bottom:12px;opacity:0.3">⚡</div>
+    <div style="font-size:12px;font-weight:600;color:#6B6B8A;margin-bottom:6px">No tools assigned yet</div>
+    <div style="font-size:10px;color:#3a3a55">Ask your admin to assign integrations to this project's pipeline.</div>
+  </div>`;
+
+  return `<div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#F0F0FF">⚡ Production Pipeline</div>
+        <div style="font-size:10px;color:#6B6B8A;margin-top:2px">${assigned.length} tool${assigned.length!==1?'s':''} assigned · Click to generate</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:20px">
+      ${assigned.map(intg => {
+        const accent = catAccent[intg.category]||'#8B5CF6';
+        const intgRuns = runs.filter(r=>r.intgId===intg.id);
+        return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);
+          border-radius:12px;overflow:hidden;transition:border-color 0.15s"
+          onmouseenter="this.style.borderColor='${accent}44'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
+          <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div style="width:8px;height:8px;border-radius:50%;background:${accent};box-shadow:0 0 6px ${accent}"></div>
+              <div style="font-size:11px;font-weight:700;color:#F0F0FF">${esc(intg.name)}</div>
+            </div>
+            <div style="font-size:9px;color:#6B6B8A">${esc(intg.category)} · ${intgRuns.length} run${intgRuns.length!==1?'s':''} on this project</div>
+          </div>
+          <div style="padding:12px 16px">
+            <div class="fg" style="margin-bottom:10px">
+              <label>Prompt</label>
+              <textarea id="pipe-prompt-${intg.id}" rows="2"
+                placeholder="Describe what to generate for ${esc(p.name)}..."
+                style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+                border-radius:7px;color:#C8C8E0;padding:8px;font-size:11px;resize:none;
+                box-sizing:border-box;font-family:inherit"></textarea>
+            </div>
+            <button onclick="runPipelineIntg('${p.id}','${intg.id}')"
+              style="width:100%;padding:9px;border-radius:8px;border:none;
+              background:linear-gradient(135deg,${accent},${accent}99);
+              color:#fff;font-size:12px;font-weight:700;cursor:pointer;
+              transition:opacity 0.15s" id="pipe-btn-${intg.id}"
+              onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">
+              ▶ Generate
+            </button>
+          </div>
+          ${intgRuns.length ? `<div style="padding:0 16px 12px">
+            <div style="font-size:9px;color:#3a3a55;font-weight:700;text-transform:uppercase;
+              letter-spacing:0.06em;margin-bottom:6px">Recent results</div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              ${intgRuns.slice(0,3).map(r=>`<div style="display:flex;align-items:center;gap:8px;
+                padding:6px 8px;background:rgba(255,255,255,0.02);border-radius:6px">
+                ${r.type==='image'&&r.url?`<img src="${r.url}" style="width:28px;height:28px;object-fit:cover;border-radius:4px">`:
+                  r.type==='video'&&r.url?`<div style="width:28px;height:28px;background:rgba(139,92,246,0.2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px">▶</div>`:
+                  `<div style="width:28px;height:28px;background:rgba(255,255,255,0.05);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px">⚡</div>`}
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:9px;color:#C8C8E0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.prompt||'').substring(0,35))}</div>
+                  <div style="font-size:8px;color:#3a3a55">${new Date(r.ts).toLocaleTimeString()}</div>
+                </div>
+                ${r.url?`<a href="${r.url}" download target="_blank"
+                  style="font-size:9px;color:#6B6B8A;text-decoration:none;
+                  padding:2px 6px;border:1px solid rgba(255,255,255,0.08);border-radius:4px">↓</a>`:''}
+              </div>`).join('')}
+            </div>
+          </div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+    ${runs.length ? `<div style="margin-top:4px">
+      <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;
+        letter-spacing:0.06em;margin-bottom:10px">Full Run History</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${runs.slice(0,15).map(r=>`<div style="display:flex;align-items:center;gap:10px;
+          padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:8px;
+          border:1px solid rgba(255,255,255,0.05)">
+          ${r.url&&r.type==='image'?`<img src="${r.url}" style="width:32px;height:32px;object-fit:cover;border-radius:5px;flex-shrink:0">`:
+            `<div style="width:32px;height:32px;background:rgba(139,92,246,0.1);border-radius:5px;
+            display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">⚡</div>`}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:10px;font-weight:600;color:#C8C8E0">${esc(r.intgName||'')}</div>
+            <div style="font-size:9px;color:#6B6B8A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.prompt||'').substring(0,60))}</div>
+          </div>
+          <div style="font-size:8px;color:#3a3a55;white-space:nowrap">${new Date(r.ts).toLocaleTimeString()}</div>
+          ${r.url?`<a href="${r.url}" target="_blank" download
+            style="font-size:9px;color:#8B5CF6;text-decoration:none;
+            padding:3px 8px;border:1px solid rgba(139,92,246,0.3);border-radius:5px">↓</a>`:''}
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
+  </div>`;
+}
+
+// ── Run an integration from within a project ──────────────────────
+async function runPipelineIntg(pid, intgId){
+  const p = DB.getProject(pid); if(!p) return;
+  const intg = DB.getIntegrations().find(i=>i.id===intgId); if(!intg) return;
+  const prompt = document.getElementById('pipe-prompt-'+intgId)?.value?.trim();
+  if(!prompt){ toast('Enter a prompt first','err'); return; }
+  const btn = document.getElementById('pipe-btn-'+intgId);
+  if(btn){ btn.textContent='⏳ Running...'; btn.disabled=true; }
+  aiStart();
+
+  try{
+    // Determine generation type from category
+    const isImage = ['Image'].includes(intg.category);
+    const isVideo = ['Video'].includes(intg.category);
+    const isAudio = ['Audio'].includes(intg.category);
+    const is3D    = ['3D','Render'].includes(intg.category);
+
+    let body = { prompt };
+    if(isImage){ body.image_size='landscape_16_9'; body.num_inference_steps=28; }
+    if(isVideo){ body.duration=5; body.aspect_ratio='16:9'; }
+    if(is3D)   { body.topology='triangle'; body.enable_pbr=true; }
+
+    // POST to the integration URL using its stored key
+    const headers = { 'Content-Type':'application/json' };
+    if(intg.key) headers['Authorization'] = 'Key '+intg.key;
+
+    // Route through fal proxy if it's a fal endpoint
+    const isFal = intg.url.includes('fal.run')||intg.url.includes('fal.ai');
+    let resultUrl = '';
+
+    if(isFal){
+      const r = await falFetch(intg.url, {method:'POST', headers, body:JSON.stringify(body)});
+      if(!r.ok){ const t=await r.text(); throw new Error('API '+r.status+': '+t.substring(0,100)); }
+      const d = await r.json();
+      if(d.request_id){
+        const statusUrl = d.status_url||intg.url.replace('queue.fal.run','queue.fal.run')+'/requests/'+d.request_id+'/status';
+        const responseUrl = d.response_url||intg.url+'/requests/'+d.request_id;
+        for(let i=0;i<120;i++){
+          await sleep(3000);
+          const rs = await falFetch(statusUrl,{headers:{'Authorization':'Key '+intg.key}});
+          const ds = await rs.json();
+          if(ds.status==='COMPLETED'){
+            const rr = await falFetch(responseUrl,{headers:{'Authorization':'Key '+intg.key}});
+            const rd = await rr.json();
+            resultUrl = rd.images?.[0]?.url||rd.video?.url||rd.audio?.url||rd.url||'';
+            break;
+          }
+          if(ds.status==='FAILED') throw new Error('Generation failed');
+        }
+      } else {
+        resultUrl = d.images?.[0]?.url||d.url||'';
+      }
+    } else {
+      // Direct API call
+      const r = await fetch(intg.url, {method:'POST', headers, body:JSON.stringify(body)});
+      if(!r.ok){ const t=await r.text(); throw new Error('API '+r.status+': '+t.substring(0,100)); }
+      const d = await r.json();
+      resultUrl = d.url||d.output||d.images?.[0]?.url||'';
+    }
+
+    // Save run to project
+    const runType = isVideo?'video':isAudio?'audio':is3D?'3d':'image';
+    if(!p.pipelineRuns) p.pipelineRuns=[];
+    p.pipelineRuns.unshift({
+      id: gid('run'),
+      intgId, intgName: intg.name,
+      prompt, url: resultUrl,
+      type: runType,
+      ts: new Date().toISOString()
+    });
+    if(p.pipelineRuns.length>50) p.pipelineRuns=p.pipelineRuns.slice(0,50);
+    DB.saveProject(p);
+    render();
+    toast(intg.name+' — result saved to project ✓','ok');
+  } catch(e){
+    toast('Pipeline run failed: '+e.message,'err');
+    console.error('[pipeline]',e);
+  } finally {
+    aiEnd();
+    if(btn){ btn.textContent='▶ Generate'; btn.disabled=false; }
+  }
+}
+
+// ══ END PIPELINE ══════════════════════════════════════════════════
 
 function adminIntegrations(){
   const intgs=DB.getIntegrations();
@@ -5879,7 +6143,7 @@ function creatorProjectDetail(p){
     {k:'complete',l:'Delivered'}
   ];
   var curIdx=wfSteps.map(function(s){return s.k;}).indexOf(wf);
-  var tabDefs=[{k:'brief',l:'Brief'},{k:'timeline',l:'Timeline'},{k:'brand',l:'Brand Folder'},{k:'resources',l:'Resources'},{k:'synopsis',l:'Synopsis'}];
+  var tabDefs=[{k:'brief',l:'Brief'},{k:'timeline',l:'Timeline'},{k:'brand',l:'Brand Folder'},{k:'resources',l:'Resources'},{k:'synopsis',l:'Synopsis'},{k:'pipeline',l:'⚡ Pipeline'}];
   var briefEntries=Object.entries(brief).filter(function(e){return e[1]&&e[0]!=='videoRefUrl'&&e[0]!=='additionalNotes';});
 
   // Build tab content
@@ -5962,6 +6226,9 @@ function creatorProjectDetail(p){
     } else {
       tabContent='<div style="color:var(--t4);font-size:11px;padding:20px;text-align:center;background:var(--bg2);border:1px dashed var(--b2);border-radius:8px">No synopsis yet. Open Studio to generate one.</div>';
     }
+  }
+  if(activeTab==='pipeline'){
+    tabContent=creatorPipelineTab(p);
   }
 
   return`<div class="page">
