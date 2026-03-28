@@ -661,6 +661,9 @@ const S={
   bType:null,bStep:0,bAnswers:{},
   // Generation history — loaded from localStorage
   sgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_sg_history')||'[]');}catch(e){return [];}})(),
+  // Persisted prompts — survive render() cycles and page refresh
+  sgPrompt: (()=>{try{return localStorage.getItem('sv2_sg_prompt')||'';}catch(e){return '';}})(),
+  vqgPrompt: (()=>{try{return localStorage.getItem('sv2_vid_prompt')||'';}catch(e){return '';}})(),
   vqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_vqg_history')||'[]');}catch(e){return [];}})(),
   sqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_sqg_history')||'[]');}catch(e){return [];}})(),
   mqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_mqg_history')||'[]');}catch(e){return [];}})(),
@@ -673,6 +676,17 @@ const S={
 function render(){
   const app=document.getElementById('app');
   const sb=document.getElementById('sbar');
+  // Save unsaved prompt text before re-render wipes the textarea
+  const sgEl=document.getElementById('sg-prompt');
+  if(sgEl&&sgEl.value)S.sgPrompt=sgEl.value;
+  const vidEl=document.getElementById('vid-prompt');
+  if(vidEl&&vidEl.value)S.vqgPrompt=vidEl.value;
+  const sqEl=document.getElementById('sq-text');
+  if(sqEl&&sqEl.value)S.sqgText=sqEl.value;
+  // Persist current tab position so page refresh restores it
+  if(S.view!=='login')_tryLS(()=>{
+    localStorage.setItem('sv2_last_tab',JSON.stringify({tab:S.tab,qgMode:S.qgMode||'txt2img',pid:S.pid||null}));
+  });
   if(S.view==='login'){sb.style.display='none';app.innerHTML=loginHTML();return}
   sb.style.display='flex';
   app.innerHTML=appBarHTML()+mainHTML();
@@ -3592,7 +3606,7 @@ function singleImageGen(){
 <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase">Prompt</label>
 <button onclick="enhancePromptQG()" id="enhance-btn" style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);border-radius:6px;color:#8B5CF6;font-size:9px;font-weight:700;padding:3px 10px;cursor:pointer;letter-spacing:0.04em">✦ Enhance</button>
 </div>
-<textarea id="sg-prompt" rows="4" placeholder="Describe what you want to generate — subject, lighting, mood, camera angle, style..." onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();runSingleGen();}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.sgPrompt||''}</textarea>
+<textarea id="sg-prompt" rows="4" placeholder="Describe what you want to generate — subject, lighting, mood, camera angle, style..." oninput="S.sgPrompt=this.value;_tryLS(()=>localStorage.setItem('sv2_sg_prompt',this.value))" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();runSingleGen();}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.sgPrompt||''}</textarea>
 <div style="font-size:9px;color:#3a3a55;margin-top:4px;text-align:right">&#8984;+Enter to generate</div>
 <div id="enhance-status" style="font-size:9px;color:#8B5CF6;margin-top:4px;display:none">✦ Enhancing with AI...</div>
 </div>
@@ -3745,7 +3759,7 @@ function videoGenPage(){
     <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase">Scene Description</label>
     ${!cinMode?`<button onclick="enhanceVidPrompt()" id="vid-enhance-btn" style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);border-radius:6px;color:#8B5CF6;font-size:9px;font-weight:700;padding:3px 10px;cursor:pointer">&#10022; Enhance</button>`:`<span style="font-size:9px;color:#6B6B8A44;font-style:italic">Enhance disabled in Cinema mode</span>`}
   </div>
-  <textarea id="vid-prompt" rows="3" placeholder="${cinMode?'Describe the subject, scene, action, environment...':'Describe the scene fully — subject, action, mood, lighting, environment...'}" oninput="${cinMode?'updateCinemaPreview()':''}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.vqgPrompt||''}</textarea>
+  <textarea id="vid-prompt" rows="3" placeholder="${cinMode?'Describe the subject, scene, action, environment...':'Describe the scene fully — subject, action, mood, lighting, environment...'}" oninput="S.vqgPrompt=this.value;_tryLS(()=>localStorage.setItem('sv2_vid_prompt',this.value));${cinMode?'updateCinemaPreview()':''}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.vqgPrompt||''}</textarea>
   ${!cinMode?`<div style="margin-top:8px;font-size:9px;color:#3a3a55">In Auto mode, AI freely interprets your prompt for the best cinematic result.</div>`:''}
 </div>
 
@@ -3976,7 +3990,7 @@ function soundGenPage(){
 <div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
 <div>
 ${sMode==='tts'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
-  <div class="fg" style="margin-bottom:12px"><label>Script</label><textarea id="sq-text" rows="5" placeholder="Type your voiceover script..." style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit">${S.sqgText||''}</textarea></div>
+  <div class="fg" style="margin-bottom:12px"><label>Script</label><textarea id="sq-text" rows="5" placeholder="Type your voiceover script..." oninput="S.sqgText=this.value" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit">${S.sqgText||''}</textarea></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
     <div class="fg"><label>Model</label><select id="sq-model" onchange="S.sqgModel=this.value;render()">${QG_TTS_MODELS.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
     <div class="fg"><label>Voice</label>${selModel.feature==='voice_id'?`<select id="sq-voice">${EL_VOICES.map(v=>`<option value="${v.id}">${v.n}</option>`).join('')}</select>`:selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah F (US)</option><option value="am_adam">Adam M (US)</option><option value="bf_emma">Emma F (UK)</option></select>`:`<div style="font-size:10px;color:#6B6B8A;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">Uses reference audio below</div>`}</div>
@@ -8783,13 +8797,37 @@ async function urlToB64(url){try{const r=await fetch(url);const b=await r.blob()
   }
   seedAdmin();
   const s=DB.getSession();
-  if(s&&s.userId&&DB.getUser(s.userId)){S.session=s;S.view=s.role;}
+  if(s&&s.userId&&DB.getUser(s.userId)){
+    S.session=s;S.view=s.role;
+    // Restore last tab position — user lands where they left off
+    try{
+      const lastPos=JSON.parse(localStorage.getItem('sv2_last_tab')||'null');
+      if(lastPos){
+        if(lastPos.tab)S.tab=lastPos.tab;
+        if(lastPos.qgMode)S.qgMode=lastPos.qgMode;
+        if(lastPos.pid)S.pid=lastPos.pid;
+      }
+    }catch(e){}
+  }
   else{DB.clearSession();S.view='login';}
   render();
   // Poll Supabase every 45s for live updates from other users
   if(SB.ready()){
     setInterval(async()=>{
       if(document.hidden)return;
+      // Save any in-progress prompts before pulling
+      const sgEl=document.getElementById('sg-prompt');
+      if(sgEl&&sgEl.value){S.sgPrompt=sgEl.value;_tryLS(()=>localStorage.setItem('sv2_sg_prompt',sgEl.value));}
+      const vidEl=document.getElementById('vid-prompt');
+      if(vidEl&&vidEl.value)S.vqgPrompt=vidEl.value;
+      const sqEl=document.getElementById('sq-text');
+      if(sqEl&&sqEl.value)S.sqgText=sqEl.value;
+      // Don't render if user is actively focused on a textarea — defer 5s
+      const focused=document.activeElement;
+      if(focused&&(focused.tagName==='TEXTAREA'||focused.tagName==='INPUT')){
+        setTimeout(async()=>{await SB.pullAll();render();},5000);
+        return;
+      }
       await SB.pullAll();
       render();
     },45000);
