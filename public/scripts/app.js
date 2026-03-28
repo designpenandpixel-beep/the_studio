@@ -3637,6 +3637,553 @@ ${!(S.sgResults&&S.sgResults.length)?`<div style="border:1px dashed rgba(255,255
 }
 function loadI2IImage(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.i2iPreview=e.target.result;S.i2iImageData=e.target.result;render();};reader.readAsDataURL(file);}
 function loadStyleRef(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.styleRefPreview=e.target.result;S.styleRefData=e.target.result;render();};reader.readAsDataURL(file);}
+
+// ════════════════════════════════════════════════════════════
+// VIDEO GENERATION PAGE — Auto / Cinema Mode
+// ════════════════════════════════════════════════════════════
+const QG_VID_MODELS=[
+  {id:'fal-ai/kling-video/v2.1/master/text-to-video',n:'Kling 2.1 Master',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Premium cinematic T2V'},
+  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master (I2V)',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Image to cinematic video'},
+  {id:'fal-ai/minimax/video-01-live',n:'Minimax Hailuo',mode:['t2v','i2v'],dur:[6],ratio:['16:9','9:16','1:1'],desc:'Fast, high quality'},
+  {id:'fal-ai/runway-gen4/turbo/image-to-video',n:'Runway Gen-4 Turbo',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16'],desc:'Hollywood-grade I2V'},
+  {id:'fal-ai/wan-2.1/text-to-video',n:'Wan 2.1 T2V',mode:['t2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source powerhouse'},
+  {id:'fal-ai/wan-2.1/image-to-video',n:'Wan 2.1 I2V',mode:['i2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source I2V'},
+  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',mode:['t2v','i2v'],dur:[5,9],ratio:['16:9','9:16','1:1'],desc:'Fast, creative motion'},
+  {id:'fal-ai/veo3',n:'Google Veo 3',mode:['t2v'],dur:[8],ratio:['16:9'],desc:'State-of-art T2V with audio'},
+  {id:'fal-ai/cogvideox-5b',n:'CogVideoX 5B',mode:['t2v'],dur:[6],ratio:['16:9'],desc:'Open source quality'},
+];
+
+const CIN={
+  lens:['Auto','Anamorphic (2.39:1)','16mm Film','35mm Cine','50mm Standard','85mm Portrait','135mm Telephoto','Macro'],
+  shot:['Auto','Wide Shot (WS)','Medium Shot (MS)','Close-Up (CU)','Extreme Close-Up (ECU)','Over-the-Shoulder','Point of View (POV)',"Bird's Eye View","Worm's Eye View",'Dutch Angle','Aerial/Drone'],
+  angle:['Auto','Eye Level','Low Angle','High Angle','Dutch Tilt','Overhead','Ground Level'],
+  move:['Static','Dolly In','Dolly Out','Dolly Left','Dolly Right','Pan Left','Pan Right','Tilt Up','Tilt Down','Crane Up','Crane Down','Orbit Left','Orbit Right','FPV Drone','Crash Zoom In','Crash Zoom Out','Whip Pan','Handheld','Bullet Time','Hyperlapse','Snorricam'],
+  dof:['Auto','Deep Focus (everything sharp)','Shallow Depth (bokeh)','Rack Focus (shift)','Tilt-Shift'],
+  style:['Cinematic','Anamorphic','VHS Tape','Super 8mm Film','Film Noir','IMAX','Handheld Documentary','Drone Aerial','Commercial Glossy'],
+  light:['Auto','Golden Hour','Blue Hour/Dusk','Night / Neon','Natural Daylight','Studio Lit','Dramatic Chiaroscuro','Overcast','Candlelit'],
+  fps:['24fps (Cinematic)','30fps (Standard)','48fps (HFR)','60fps (Smooth)'],
+  time:['Normal','Ease In (slow start)','Ease Out (slow end)','Slow Motion 0.5×','Ultra Slow 0.25×','Hyperlapse 4×','Timelapse 10×'],
+};
+
+function assembleCinemaPrompt(basePrompt){
+  const g=id=>document.getElementById(id)?.value||'';
+  const parts=[basePrompt.trim()];
+  const lens=g('cin-lens');if(lens&&lens!=='Auto')parts.push('Lens: '+lens);
+  const shot=g('cin-shot');if(shot&&shot!=='Auto')parts.push(shot);
+  const angle=g('cin-angle');if(angle&&angle!=='Auto')parts.push(angle);
+  const m1=g('cin-move1'),m2=g('cin-move2'),m3=g('cin-move3');
+  const moves=[m1,m2,m3].filter(m=>m&&m!=='Static'&&m!=='');
+  if(moves.length)parts.push('Camera: '+moves.join(' + '));
+  const dof=g('cin-dof');if(dof&&dof!=='Auto')parts.push(dof);
+  const style=g('cin-style');if(style&&style!=='Cinematic')parts.push(style+' aesthetic');
+  const light=g('cin-light');if(light&&light!=='Auto')parts.push('Lighting: '+light);
+  const fps=g('cin-fps');if(fps&&fps!=='30fps (Standard)')parts.push(fps);
+  const time=g('cin-time');if(time&&time!=='Normal')parts.push('Speed: '+time);
+  return parts.join('. ').replace(/\.\./g,'.')+'.';
+}
+
+function updateCinemaPreview(){
+  const base=document.getElementById('vid-prompt')?.value?.trim()||'';
+  const preview=document.getElementById('cin-preview');
+  if(preview)preview.value=assembleCinemaPrompt(base);
+}
+
+function videoGenPage(){
+  const vMode=S.vqgMode||'t2v';
+  const cinMode=S.vqgCinMode!==false; // true = Cinema, false = Auto
+  const selModelId=S.vqgModel||(vMode==='i2v'?QG_VID_MODELS.find(m=>m.mode.includes('i2v'))?.id:QG_VID_MODELS[0].id);
+  const selModel=QG_VID_MODELS.find(m=>m.id===selModelId)||QG_VID_MODELS[0];
+  const availModels=QG_VID_MODELS.filter(m=>m.mode.includes(vMode));
+  const results=S.vqgResults||[];
+
+  const subTab=(k,lbl)=>`<button onclick="S.vqgMode='${k}';S.vqgModel=null;render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${vMode===k?'rgba(139,92,246,0.5)':'rgba(255,255,255,0.07)'};background:${vMode===k?'rgba(139,92,246,0.1)':'transparent'};color:${vMode===k?'#8B5CF6':'#6B6B8A'};transition:all 0.15s">${lbl}</button>`;
+
+  // Build cinema selectors
+  const sel=(id,opts,onchange)=>`<select id="${id}" onchange="${onchange||'updateCinemaPreview()'}" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px;cursor:pointer">${opts.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`;
+
+  return`<div style="max-width:1000px">
+<!-- Sub mode tabs -->
+<div style="display:flex;gap:6px;margin-bottom:20px;align-items:center;flex-wrap:wrap">
+  <div style="display:flex;gap:5px">${subTab('t2v','Text \u2192 Video')}${subTab('i2v','Image \u2192 Video')}</div>
+  <div style="flex:1"></div>
+  <!-- Auto / Cinema toggle -->
+  <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:4px">
+    <button onclick="S.vqgCinMode=false;render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:none;background:${!cinMode?'rgba(255,107,53,0.15)':'transparent'};color:${!cinMode?'#FF6B35':'#6B6B8A'};transition:all 0.15s">Auto</button>
+    <button onclick="S.vqgCinMode=true;render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:none;background:${cinMode?'rgba(139,92,246,0.15)':'transparent'};color:${cinMode?'#8B5CF6':'#6B6B8A'};transition:all 0.15s">&#127916; Cinema</button>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start">
+<!-- LEFT: Controls -->
+<div>
+<!-- Scene prompt -->
+<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase">Scene Description</label>
+    ${!cinMode?`<button onclick="enhanceVidPrompt()" id="vid-enhance-btn" style="background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);border-radius:6px;color:#8B5CF6;font-size:9px;font-weight:700;padding:3px 10px;cursor:pointer">&#10022; Enhance</button>`:`<span style="font-size:9px;color:#6B6B8A44;font-style:italic">Enhance disabled in Cinema mode</span>`}
+  </div>
+  <textarea id="vid-prompt" rows="3" placeholder="${cinMode?'Describe the subject, scene, action, environment...':'Describe the scene fully — subject, action, mood, lighting, environment...'}" oninput="${cinMode?'updateCinemaPreview()':''}" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">${S.vqgPrompt||''}</textarea>
+  ${!cinMode?`<div style="margin-top:8px;font-size:9px;color:#3a3a55">In Auto mode, AI freely interprets your prompt for the best cinematic result.</div>`:''}
+</div>
+
+<!-- I2V source image -->
+${vMode==='i2v'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:16px;margin-bottom:14px">
+  <label style="font-size:10px;font-weight:700;color:#6B6B8A;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:10px">First Frame</label>
+  <div onclick="document.getElementById('vid-src-file').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:10px;padding:${S.vqgSrcPreview?'8px':'22px'};text-align:center;cursor:pointer;transition:border-color 0.15s" onmouseenter="this.style.borderColor='rgba(139,92,246,0.4)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
+    ${S.vqgSrcPreview?`<img src="${S.vqgSrcPreview}" style="max-height:120px;max-width:100%;border-radius:6px;margin-bottom:4px"><div style="font-size:9px;color:#6B6B8A">Click to change</div>`:`<div style="font-size:28px;margin-bottom:8px;opacity:0.3">&#127916;</div><div style="font-size:11px;color:#6B6B8A;font-weight:600">Upload first frame image</div>`}
+  </div>
+  <input type="file" id="vid-src-file" accept="image/*" style="display:none" onchange="loadVidSrcImage(this)">
+  ${S.sgResults&&S.sgResults.length?`<div style="font-size:9px;color:#3a3a55;margin-top:8px;margin-bottom:5px">Or use generated image:</div><div style="display:flex;gap:5px;flex-wrap:wrap">${S.sgResults.slice(0,4).map(r=>`<img src="${r.url}" onclick="S.vqgSrcPreview='${r.url}';S.vqgSrcUrl='${r.url}';render()" style="width:50px;height:50px;object-fit:cover;border-radius:5px;cursor:pointer;border:2px solid ${S.vqgSrcUrl===r.url?'#8B5CF6':'rgba(255,255,255,0.08)'}">`).join('')}</div>`:''}
+</div>`:''}
+
+<!-- CINEMA MODE CONTROLS -->
+${cinMode?`<div style="background:linear-gradient(135deg,rgba(139,92,246,0.06),rgba(6,182,212,0.04));border:1px solid rgba(139,92,246,0.2);border-radius:12px;padding:18px;margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+    <div style="width:6px;height:6px;border-radius:50%;background:#8B5CF6;box-shadow:0 0 8px #8B5CF6"></div>
+    <span style="font-size:11px;font-weight:700;color:#8B5CF6;letter-spacing:0.08em;text-transform:uppercase">Cinema Controls</span>
+    <span style="font-size:9px;color:#3a3a55;margin-left:4px">Director mode — set the virtual camera rig</span>
+  </div>
+
+  <!-- Row 1: Lens + Shot type + Angle -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Lens</label>${sel('cin-lens',CIN.lens)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Shot Type</label>${sel('cin-shot',CIN.shot)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Angle</label>${sel('cin-angle',CIN.angle)}</div>
+  </div>
+
+  <!-- Row 2: Camera movements (stack up to 3) -->
+  <div style="margin-bottom:12px">
+    <label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Camera Movement <span style="color:#3a3a55;font-weight:400">— stack up to 3 moves</span></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      ${sel('cin-move1',CIN.move)}${sel('cin-move2',['—',...CIN.move])}${sel('cin-move3',['—',...CIN.move])}
+    </div>
+  </div>
+
+  <!-- Row 3: DOF + Film style + Lighting -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Depth of Field</label>${sel('cin-dof',CIN.dof)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Film Style</label>${sel('cin-style',CIN.style)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Lighting Mood</label>${sel('cin-light',CIN.light)}</div>
+  </div>
+
+  <!-- Row 4: FPS + Time remapping -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Frame Rate Feel</label>${sel('cin-fps',CIN.fps)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Time Remapping</label>${sel('cin-time',CIN.time)}</div>
+  </div>
+
+  <!-- Assembled cinematic prompt (live preview) -->
+  <div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <label style="font-size:9px;font-weight:700;color:#06B6D4;letter-spacing:0.06em;text-transform:uppercase">Assembled Cinematic Prompt <span style="color:#3a3a55;font-weight:400">— editable before generate</span></label>
+      <button onclick="updateCinemaPreview()" style="background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.3);border-radius:5px;color:#06B6D4;font-size:9px;padding:2px 8px;cursor:pointer">&#8635; Refresh</button>
+    </div>
+    <textarea id="cin-preview" rows="4" placeholder="Select controls above to build your cinematic prompt..." style="width:100%;background:rgba(6,182,212,0.04);border:1px solid rgba(6,182,212,0.2);border-radius:8px;color:#C8C8E0;padding:10px;font-size:11px;resize:vertical;box-sizing:border-box;font-family:monospace;line-height:1.5"></textarea>
+    <div style="font-size:9px;color:#3a3a55;margin-top:4px">This exact text is sent to the model. You can edit it directly.</div>
+  </div>
+</div>`:''}
+
+<!-- Negative prompt (both modes) -->
+<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px;margin-bottom:14px">
+  <label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:6px">Negative Prompt</label>
+  <input type="text" id="vid-neg-prompt" value="${S.vqgNeg||'blur, distortion, watermark, bad quality'}" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px;box-sizing:border-box">
+</div>
+
+<!-- Model + Duration + Ratio -->
+<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px;margin-bottom:14px">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Model</label>
+      <select id="vid-model" onchange="S.vqgModel=this.value;render()" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
+        ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
+      </select>
+      <div style="font-size:8px;color:#3a3a55;margin-top:3px">${selModel.desc||''}</div>
+    </div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Duration</label>
+      <select id="vid-dur" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
+        ${(selModel.dur||[5]).map(d=>`<option value="${d}">${d}s</option>`).join('')}
+      </select>
+    </div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Aspect Ratio</label>
+      <select id="vid-ratio" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
+        ${(selModel.ratio||['16:9']).map(r=>`<option value="${r}">${r}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Generate button -->
+<button id="vid-gen-btn" onclick="runVideoGen()" style="width:100%;padding:14px;border-radius:10px;border:none;background:${cinMode?'linear-gradient(135deg,#8B5CF6,#06B6D4)':'linear-gradient(135deg,#FF6B35,#8B5CF6)'};color:#fff;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:0.02em;transition:opacity 0.2s" onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">
+  ${cinMode?'&#127916; Direct &amp; Generate':'&#10022; Generate Video'}
+</button>
+<div id="vid-gen-status" style="font-size:9px;color:#6B6B8A;text-align:center;margin-top:8px;display:none">Generating... 30-120s depending on model</div>
+</div>
+
+<!-- RIGHT: Results -->
+<div>
+  <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px">Generated Videos</div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    ${results.map(v=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;overflow:hidden;transition:border-color 0.15s" onmouseenter="this.style.borderColor='rgba(139,92,246,0.3)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.07)'">
+      <video src="${v.url}" controls style="width:100%;display:block;border-radius:8px 8px 0 0"></video>
+      <div style="padding:8px 10px">
+        <div style="font-size:9px;color:#6B6B8A;margin-bottom:6px">${v.model||''} &middot; ${v.dur||''}s &middot; ${v.mode||''} &middot; ${new Date(v.ts).toLocaleTimeString()}</div>
+        ${v.cinPrompt?`<div style="font-size:9px;color:#8B5CF644;margin-bottom:6px;font-style:italic">${v.cinPrompt.substring(0,80)}...</div>`:''}
+        <div style="display:flex;gap:6px">
+          <a href="${v.url}" download style="flex:1;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a>
+          <button style="font-size:10px;padding:6px 10px;border-radius:6px;border:1px solid rgba(139,92,246,0.3);color:#8B5CF6;background:rgba(139,92,246,0.06);cursor:pointer" onclick="S.vqgSrcUrl='${v.url}';S.vqgSrcPreview='${v.url}';S.vqgMode='i2v';render()">Extend &#8594;</button>
+        </div>
+      </div>
+    </div>`).join('')}
+    ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:32px;text-align:center;color:#3a3a55"><div style="font-size:32px;margin-bottom:10px;opacity:0.4">&#127916;</div><div style="font-size:11px">Generated videos appear here</div>${cinMode?`<div style="font-size:9px;color:#8B5CF644;margin-top:6px">Cinema mode active &mdash; controls will be compiled into prompt</div>`:''}  </div>`:''}
+  </div>
+</div>
+</div>
+</div>`;
+}
+
+function loadVidSrcImage(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.vqgSrcPreview=e.target.result;S.vqgSrcUrl=e.target.result;render();};r.readAsDataURL(f);}
+function loadVidLastFrame(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.vqgLastPreview=e.target.result;render();};r.readAsDataURL(f);}
+
+async function enhanceVidPrompt(){
+  const el=document.getElementById('vid-prompt');const cur=el?.value?.trim();
+  if(!cur)return toast('Enter a prompt first','err');
+  const btn=document.getElementById('vid-enhance-btn');if(btn){btn.textContent='Enhancing...';btn.disabled=true;}
+  try{
+    const r=await callClaude('You are a cinematic video prompt expert. Enhance the prompt for AI video generation — add scene energy, subject detail, environmental context, mood, atmosphere. Return ONLY the enhanced prompt under 120 words.','Enhance: "'+cur+'"',200);
+    if(el&&r){el.value=r.trim();S.vqgPrompt=r.trim();}toast('Enhanced','ok');
+  }catch(e){toast('Enhancement failed','err');}
+  if(btn){btn.textContent='\u2726 Enhance';btn.disabled=false;}
+}
+
+async function runVideoGen(){
+  const cinMode=S.vqgCinMode!==false;
+  let prompt;
+  if(cinMode){
+    // Use assembled cinema prompt
+    prompt=document.getElementById('cin-preview')?.value?.trim();
+    if(!prompt){
+      // Auto-assemble if preview is empty
+      const base=document.getElementById('vid-prompt')?.value?.trim();
+      if(!base)return toast('Enter a scene description','err');
+      prompt=assembleCinemaPrompt(base);
+    }
+  } else {
+    prompt=document.getElementById('vid-prompt')?.value?.trim();
+  }
+  if(!prompt)return toast('Enter a scene description','err');
+  const falKey=kF();if(!falKey)return toast('Enter fal.ai key in Settings','err');
+
+  const modelId=document.getElementById('vid-model')?.value||QG_VID_MODELS[0].id;
+  const dur=parseInt(document.getElementById('vid-dur')?.value||'5');
+  const ratio=document.getElementById('vid-ratio')?.value||'16:9';
+  const neg=document.getElementById('vid-neg-prompt')?.value||'';
+  const vMode=S.vqgMode||'t2v';
+
+  S.vqgPrompt=document.getElementById('vid-prompt')?.value?.trim()||'';
+  S.vqgNeg=neg;
+
+  const btn=document.getElementById('vid-gen-btn');
+  const status=document.getElementById('vid-gen-status');
+  if(btn){btn.textContent='Generating...';btn.disabled=true;}
+  if(status)status.style.display='block';
+  aiStart();
+
+  try{
+    let body={prompt,duration:dur,aspect_ratio:ratio};
+    if(neg)body.negative_prompt=neg;
+    if(vMode==='i2v'){
+      const imgUrl=S.vqgSrcUrl||S.vqgSrcPreview;
+      if(!imgUrl)throw new Error('Upload a first frame image for I2V mode');
+      body.image_url=imgUrl;
+    }
+    // Model-specific adjustments
+    if(modelId.includes('minimax'))body={prompt,image_url:vMode==='i2v'?(S.vqgSrcUrl||''):'',negative_prompt:neg||undefined};
+    if(modelId.includes('runway'))body={prompt_text:prompt,image_url:S.vqgSrcUrl||'',duration:dur,ratio};
+    if(modelId.includes('luma')){body={prompt,aspect_ratio:ratio,duration:dur+'s'};if(vMode==='i2v')body.keyframes={frame0:{type:'image',url:S.vqgSrcUrl||''}};}
+
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+falKey,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,120));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+    for(let i=0;i<180;i++){
+      await sleep(3000);
+      if(status)status.textContent='Generating... '+Math.round(i*3)+'s elapsed';
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+falKey}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+falKey}});
+        const rd=await rr.json();
+        const videoUrl=rd.video?.url||rd.videos?.[0]?.url||rd.url||'';
+        if(!videoUrl)throw new Error('No video URL. Response: '+JSON.stringify(rd).substring(0,100));
+        if(!S.vqgResults)S.vqgResults=[];
+        S.vqgResults.unshift({id:gid('v'),url:videoUrl,prompt,cinPrompt:cinMode?prompt:null,model:modelId.split('/').pop(),dur,mode:vMode,ts:new Date().toISOString()});
+        render();toast('Video ready!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('Generation failed: '+(ds.error||''));
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('Video failed: '+e.message,'err');console.error('[vid]',e);}
+  finally{aiEnd();if(btn){btn.textContent=cinMode?'\u{1F3AC} Direct & Generate':'\u2606 Generate Video';btn.disabled=false;}if(status)status.style.display='none';}
+}
+
+// ════════════════════════════════════════════════════════════
+// SOUND STUDIO PAGE
+// ════════════════════════════════════════════════════════════
+const QG_TTS_MODELS=[
+  {id:'fal-ai/elevenlabs/tts/multilingual-v2',n:'ElevenLabs Multilingual v2',desc:'29 languages, ultra-natural',feature:'voice_id'},
+  {id:'fal-ai/elevenlabs/tts/turbo-v2.5',n:'ElevenLabs Turbo v2.5',desc:'32 languages, low-latency',feature:'voice_id'},
+  {id:'fal-ai/minimax/speech-02-hd',n:'MiniMax Speech-02 HD',desc:'300+ voices, 30+ languages',feature:'minimax'},
+  {id:'fal-ai/kokoro',n:'Kokoro TTS',desc:'Fast, cost-efficient',feature:'voice'},
+  {id:'fal-ai/f5-tts',n:'F5-TTS Voice Clone',desc:'Clone any voice from audio',feature:'clone'},
+  {id:'fal-ai/resemble-ai/chatterbox',n:'Chatterbox',desc:'Expressive, personality-driven',feature:'clone'},
+];
+const EL_VOICES=[{id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel — Calm, narrative'},{id:'9BWtsMINqrJLrRacOk9x',n:'Aria — Warm, conversational'},{id:'EXAVITQu4vr4xnSDxMaL',n:'Sarah — Soft, expressive'},{id:'TxGEqnHWrfWFTfGW9XjX',n:'Josh — Deep, authoritative'},{id:'ErXwobaYiN019PkySvjV',n:'Antoni — Warm, friendly'},{id:'pNInz6obpgDQGcFmaJgB',n:'Adam — Authoritative M'},{id:'onwK4e9ZLuTAKqWW03F9',n:'Daniel — British M'}];
+
+function soundGenPage(){
+  const sMode=S.sqgMode||'tts';
+  const selModelId=S.sqgModel||QG_TTS_MODELS[0].id;
+  const selModel=QG_TTS_MODELS.find(m=>m.id===selModelId)||QG_TTS_MODELS[0];
+  const results=S.sqgResults||[];
+  const subTab=(k,lbl,ico)=>`<button onclick="S.sqgMode='${k}';render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${sMode===k?'rgba(16,185,129,0.5)':'rgba(255,255,255,0.07)'};background:${sMode===k?'rgba(16,185,129,0.1)':'transparent'};color:${sMode===k?'#10B981':'#6B6B8A'};transition:all 0.15s">${ico} ${lbl}</button>`;
+  return`<div style="max-width:900px">
+<div style="display:flex;gap:5px;margin-bottom:20px;flex-wrap:wrap">${subTab('tts','Voiceover','&#127908;')}${subTab('sfx','SFX','&#9889;')}${subTab('music','Music','&#127911;')}${subTab('isolate','Voice Isolate','&#127911;')}</div>
+<div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
+<div>
+${sMode==='tts'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div class="fg" style="margin-bottom:12px"><label>Script</label><textarea id="sq-text" rows="5" placeholder="Type your voiceover script..." style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit">${S.sqgText||''}</textarea></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+    <div class="fg"><label>Model</label><select id="sq-model" onchange="S.sqgModel=this.value;render()">${QG_TTS_MODELS.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+    <div class="fg"><label>Voice</label>${selModel.feature==='voice_id'?`<select id="sq-voice">${EL_VOICES.map(v=>`<option value="${v.id}">${v.n}</option>`).join('')}</select>`:selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah F (US)</option><option value="am_adam">Adam M (US)</option><option value="bf_emma">Emma F (UK)</option></select>`:`<div style="font-size:10px;color:#6B6B8A;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">Uses reference audio below</div>`}</div>
+  </div>
+  ${selModel.feature==='clone'?`<div class="fg" style="margin-bottom:12px"><label>Reference Audio (for cloning)</label><div onclick="document.getElementById('sq-ref-audio').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:14px;text-align:center;cursor:pointer"><div style="font-size:9px;color:#6B6B8A">${S.sqgRefAudioName||'Upload 10+ second audio sample'}</div></div><input type="file" id="sq-ref-audio" accept="audio/*" style="display:none" onchange="loadSqRefAudio(this)"></div>`:''}
+  <button id="sq-gen-btn" onclick="runTTSGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#127908; Generate Voiceover</button>
+</div>`:
+sMode==='sfx'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div class="fg" style="margin-bottom:12px"><label>Sound Effect Description</label><textarea id="sq-sfx-prompt" rows="3" placeholder="e.g. Thunderstorm with heavy rain, distant lightning..." style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:none;box-sizing:border-box;font-family:inherit"></textarea></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Duration</label><select id="sq-sfx-dur"><option value="2">2s</option><option value="5" selected>5s</option><option value="10">10s</option><option value="22">22s</option></select></div>
+    <div class="fg"><label>Category</label><select id="sq-sfx-cat"><option>Nature</option><option>Urban</option><option>Sci-fi</option><option>Fantasy</option><option>Weapons</option><option>Cinematic</option><option>UI/Interface</option></select></div>
+  </div>
+  <button onclick="runSFXGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#9889; Generate SFX</button>
+</div>`:
+sMode==='music'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div class="fg" style="margin-bottom:12px"><label>Music Description</label><textarea id="sq-music-prompt" rows="3" placeholder="e.g. Uplifting cinematic orchestral score, brass and strings, epic build-up..." style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:none;box-sizing:border-box;font-family:inherit"></textarea></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Genre</label><select id="sq-music-genre"><option>Cinematic</option><option>Electronic</option><option>Hip-Hop</option><option>Ambient</option><option>Classical</option><option>Jazz</option></select></div>
+    <div class="fg"><label>Mood</label><select id="sq-music-mood"><option>Uplifting</option><option>Dramatic</option><option>Melancholic</option><option>Tense</option><option>Energetic</option></select></div>
+    <div class="fg"><label>Duration</label><select id="sq-music-dur"><option value="15">15s</option><option value="30" selected>30s</option><option value="60">60s</option></select></div>
+  </div>
+  <button onclick="runMusicGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#127911; Generate Music</button>
+</div>`:
+`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div class="fg" style="margin-bottom:14px"><label>Audio to Isolate</label><div onclick="document.getElementById('sq-isolate-file').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:20px;text-align:center;cursor:pointer"><div style="font-size:9px;color:#6B6B8A">${S.sqgIsolateName||'Upload audio with voice + background noise'}</div></div><input type="file" id="sq-isolate-file" accept="audio/*" style="display:none" onchange="loadSqIsolateFile(this)"></div>
+  <button onclick="runVoiceIsolate()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#127908; Isolate Voice</button>
+</div>`}
+</div>
+<div>
+  <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Generated</div>
+  ${results.map(a=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:4px">${esc(a.type||'Audio')}</div><div style="font-size:9px;color:#6B6B8A;margin-bottom:8px">${new Date(a.ts).toLocaleTimeString()}</div><audio controls src="${a.url}" style="width:100%;margin-bottom:8px"></audio><a href="${a.url}" download style="display:block;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a></div>`).join('')}
+  ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#127925;</div>Audio appears here</div>`:''}
+</div>
+</div></div>`;
+}
+
+function loadSqRefAudio(input){const f=input.files[0];if(!f)return;S.sqgRefAudioName=f.name;const r=new FileReader();r.onload=e=>{S.sqgRefAudioData=e.target.result;render();};r.readAsDataURL(f);}
+function loadSqIsolateFile(input){const f=input.files[0];if(!f)return;S.sqgIsolateName=f.name;const r=new FileReader();r.onload=e=>{S.sqgIsolateData=e.target.result;render();};r.readAsDataURL(f);}
+
+async function runTTSGen(){
+  const text=document.getElementById('sq-text')?.value?.trim();if(!text)return toast('Enter a script','err');
+  const modelId=document.getElementById('sq-model')?.value||QG_TTS_MODELS[0].id;
+  const voice=document.getElementById('sq-voice')?.value||'21m00Tcm4TlvDq8ikWAM';
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');
+  S.sqgText=text;const btn=document.getElementById('sq-gen-btn');if(btn){btn.textContent='Generating...';btn.disabled=true;}aiStart();
+  try{
+    let body={};
+    if(modelId.includes('eleven'))body={text,voice_id:voice};
+    else if(modelId.includes('minimax'))body={text,voice_id:voice||'male-qn-qingse'};
+    else if(modelId.includes('kokoro'))body={text,voice:voice||'af_sarah'};
+    else if(modelId.includes('f5'))body={gen_text:text,ref_audio_url:S.sqgRefAudioData||'https://storage.googleapis.com/falserverless/example_inputs/reference_audio.wav',model_type:'F5-TTS'};
+    else body={text,exaggeration:0.5};
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+    for(let i=0;i<60;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voiceover',ts:new Date().toISOString()});render();toast('Voiceover ready!','ok');return;}if(ds.status==='FAILED')throw new Error('TTS failed');}throw new Error('Timeout');
+  }catch(e){toast('TTS failed: '+e.message,'err');}finally{aiEnd();if(btn){btn.textContent='\u{1F3A8} Generate Voiceover';btn.disabled=false;}}
+}
+
+async function runSFXGen(){
+  const prompt=document.getElementById('sq-sfx-prompt')?.value?.trim();if(!prompt)return toast('Describe the sound','err');
+  const dur=parseInt(document.getElementById('sq-sfx-dur')?.value||'5');
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');aiStart();
+  try{
+    const r=await falFetch('https://queue.fal.run/fal-ai/elevenlabs/sound-effects',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify({text:prompt,duration_seconds:dur})});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id;
+    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'SFX',ts:new Date().toISOString()});render();toast('SFX ready!','ok');return;}if(ds.status==='FAILED')throw new Error('SFX failed');}throw new Error('Timeout');
+  }catch(e){toast('SFX failed: '+e.message,'err');}finally{aiEnd();}
+}
+
+async function runMusicGen(){
+  const genre=document.getElementById('sq-music-genre')?.value||'Cinematic';
+  const mood=document.getElementById('sq-music-mood')?.value||'Uplifting';
+  const dur=parseInt(document.getElementById('sq-music-dur')?.value||'30');
+  const desc=document.getElementById('sq-music-prompt')?.value?.trim()||'';
+  const prompt=(desc||'')+'. Genre: '+genre+'. Mood: '+mood+'.';
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');aiStart();
+  try{
+    const r=await falFetch('https://queue.fal.run/fal-ai/ace-step',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify({prompt,duration:dur,instrumental:true})});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id;
+    for(let i=0;i<80;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Music',ts:new Date().toISOString()});render();toast('Music ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Music failed');}throw new Error('Timeout');
+  }catch(e){toast('Music failed: '+e.message,'err');}finally{aiEnd();}
+}
+
+async function runVoiceIsolate(){
+  if(!S.sqgIsolateData)return toast('Upload audio file first','err');
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');aiStart();
+  try{
+    const r=await falFetch('https://queue.fal.run/fal-ai/elevenlabs/audio-isolation',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify({audio_url:S.sqgIsolateData})});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id;
+    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voice Isolated',ts:new Date().toISOString()});render();toast('Voice isolated!','ok');return;}if(ds.status==='FAILED')throw new Error('Isolation failed');}throw new Error('Timeout');
+  }catch(e){toast('Isolation failed: '+e.message,'err');}finally{aiEnd();}
+}
+
+// ════════════════════════════════════════════════════════════
+// MOTION GRAPHICS PAGE
+// ════════════════════════════════════════════════════════════
+function motionGenPage(){
+  const mMode=S.mqgMode||'effect';
+  const results=S.mqgResults||[];
+  const subTab=(k,lbl)=>`<button onclick="S.mqgMode='${k}';render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${mMode===k?'rgba(245,158,11,0.5)':'rgba(255,255,255,0.07)'};background:${mMode===k?'rgba(245,158,11,0.1)':'transparent'};color:${mMode===k?'#F59E0B':'#6B6B8A'};transition:all 0.15s">${lbl}</button>`;
+  return`<div style="max-width:900px">
+<div style="display:flex;gap:5px;margin-bottom:20px;flex-wrap:wrap">${subTab('effect','&#10024; Effects')}${subTab('transition','&#8614; Transitions')}${subTab('animate','&#127916; Animate Image')}${subTab('t2v','&#128196; Text Motion')}</div>
+<div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
+<div>
+<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div class="fg" style="margin-bottom:12px"><label>${mMode==='t2v'?'Motion Prompt':'Motion Description (optional)'}</label><textarea id="mq-prompt" rows="2" placeholder="${mMode==='effect'?'Optional: describe the effect...':mMode==='t2v'?'Describe the motion graphic...':'Describe the motion, camera movement...'}" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:8px;font-size:11px;resize:none;box-sizing:border-box;font-family:inherit"></textarea></div>
+  ${mMode!=='t2v'?`<div class="fg" style="margin-bottom:12px"><label>${mMode==='transition'?'Image 1 (Start Frame)':'Source Image'}</label><div onclick="document.getElementById('mq-img1').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:${S.mqgImg1?'8px':'18px'};text-align:center;cursor:pointer">${S.mqgImg1?`<img src="${S.mqgImg1}" style="max-height:80px;border-radius:4px">`:`<div style="font-size:9px;color:#6B6B8A">Upload source image</div>`}</div><input type="file" id="mq-img1" accept="image/*" style="display:none" onchange="loadMqImg1(this)"></div>`:''}
+  ${mMode==='transition'?`<div class="fg" style="margin-bottom:12px"><label>Image 2 (End Frame)</label><div onclick="document.getElementById('mq-img2').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:${S.mqgImg2?'8px':'18px'};text-align:center;cursor:pointer">${S.mqgImg2?`<img src="${S.mqgImg2}" style="max-height:80px;border-radius:4px">`:`<div style="font-size:9px;color:#6B6B8A">Upload end frame image</div>`}</div><input type="file" id="mq-img2" accept="image/*" style="display:none" onchange="loadMqImg2(this)"></div>`:''}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Duration</label><select id="mq-dur"><option value="3">3s</option><option value="5" selected>5s</option><option value="8">8s</option><option value="10">10s</option></select></div>
+    ${mMode==='effect'?`<div class="fg"><label>Effect Type</label><select id="mq-effect"><option value="zoom_in">Zoom In</option><option value="zoom_out">Zoom Out</option><option value="rotate">Rotate</option><option value="glitch">Glitch</option><option value="cinematic">Cinematic</option><option value="slow_motion">Slow Motion</option><option value="explosion">Explosion</option></select></div>`:`<div class="fg"><label>Model</label><select id="mq-model"><option value="fal-ai/kling-video/v2.1/master/image-to-video">Kling 2.1</option><option value="fal-ai/luma-dream-machine/ray-2-flash">Luma Ray 2</option><option value="fal-ai/wan-2.1/image-to-video">Wan 2.1</option></select></div>`}
+  </div>
+  <button id="mq-gen-btn" onclick="runMotionGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#F59E0B,#FF6B35);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#9889; Generate Motion</button>
+</div>
+</div>
+<div>
+  <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Generated</div>
+  ${results.map(v=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;overflow:hidden;margin-bottom:8px"><video src="${v.url}" controls style="width:100%;display:block"></video><div style="padding:8px;display:flex;gap:6px"><a href="${v.url}" download style="flex:1;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a></div></div>`).join('')}
+  ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#9889;</div>Motion appears here</div>`:''}
+</div>
+</div></div>`;
+}
+
+function loadMqImg1(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.mqgImg1=e.target.result;render();};r.readAsDataURL(f);}
+function loadMqImg2(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.mqgImg2=e.target.result;render();};r.readAsDataURL(f);}
+
+async function runMotionGen(){
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');
+  const modelId=document.getElementById('mq-model')?.value||'fal-ai/kling-video/v2.1/master/image-to-video';
+  const prompt=document.getElementById('mq-prompt')?.value?.trim()||'Dynamic motion';
+  const dur=parseInt(document.getElementById('mq-dur')?.value||'5');
+  const effect=document.getElementById('mq-effect')?.value||'zoom_in';
+  const mMode=S.mqgMode||'effect';
+  const btn=document.getElementById('mq-gen-btn');if(btn){btn.textContent='Generating...';btn.disabled=true;}aiStart();
+  try{
+    let body={},finalModel=modelId;
+    if(mMode==='effect'){finalModel='fal-ai/pixverse/v4.5/effects';body={image_url:S.mqgImg1||'',effect_type:effect,prompt};}
+    else if(mMode==='transition'){finalModel='fal-ai/pixverse/v4.5/transitions';body={start_image_url:S.mqgImg1||'',end_image_url:S.mqgImg2||'',prompt,duration:dur};}
+    else if(mMode==='animate')body={image_url:S.mqgImg1||'',prompt,duration:dur,aspect_ratio:'16:9'};
+    else body={prompt,duration:dur,aspect_ratio:'16:9'};
+    const r=await falFetch('https://queue.fal.run/'+finalModel,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+finalModel+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+finalModel+'/requests/'+d.request_id;
+    for(let i=0;i<120;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.video?.url||rd.videos?.[0]?.url||rd.url||'';if(!url)throw new Error('No video URL');if(!S.mqgResults)S.mqgResults=[];S.mqgResults.unshift({id:gid('mq'),url,ts:new Date().toISOString()});render();toast('Motion ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Motion failed');}throw new Error('Timeout');
+  }catch(e){toast('Motion failed: '+e.message,'err');}finally{aiEnd();if(btn){btn.textContent='\u26A1 Generate Motion';btn.disabled=false;}}
+}
+
+// ════════════════════════════════════════════════════════════
+// 3D GENERATION PAGE
+// ════════════════════════════════════════════════════════════
+function threeDGenPage(){
+  const tMode=S.tdMode||'t2t';
+  const results=S.tdResults||[];
+  const subTab=(k,lbl)=>`<button onclick="S.tdMode='${k}';render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${tMode===k?'rgba(6,182,212,0.5)':'rgba(255,255,255,0.07)'};background:${tMode===k?'rgba(6,182,212,0.1)':'transparent'};color:${tMode===k?'#06B6D4':'#6B6B8A'};transition:all 0.15s">${lbl}</button>`;
+  const modelsByMode={t2t:[{id:'fal-ai/meshy/v6/text-to-3d',n:'Meshy v6'},{id:'fal-ai/meshy/v6-preview/text-to-3d',n:'Meshy v6 Preview'}],i2t:[{id:'tripo3d/tripo/v2.5/image-to-3d',n:'Tripo3D v2.5'},{id:'fal-ai/meshy/v5/image-to-3d',n:'Meshy v5'}],multi:[{id:'fal-ai/meshy/v5/multi-image-to-3d',n:'Meshy v5 Multi'}],retex:[{id:'fal-ai/meshy/v5/retexture',n:'Meshy v5 Retexture'}]};
+  const models=modelsByMode[tMode]||modelsByMode.t2t;
+  const selId=S.tdModel||models[0]?.id;
+  return`<div style="max-width:1000px">
+<div style="display:flex;gap:5px;margin-bottom:20px;flex-wrap:wrap">${subTab('t2t','&#128196; Text \u2192 3D')}${subTab('i2t','&#128247; Image \u2192 3D')}${subTab('multi','&#128195; Multi-Image')}${subTab('retex','&#127912; Retexture')}</div>
+<div style="display:grid;grid-template-columns:1fr 340px;gap:16px">
+<div>
+<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Model</label><select id="td-model" onchange="S.tdModel=this.value">${models.map(m=>`<option value="${m.id}"${selId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+    <div class="fg"><label>Output Format</label><select id="td-fmt"><option value="glb">GLB (web/AR)</option><option value="fbx">FBX (game)</option><option value="obj">OBJ (general)</option></select></div>
+  </div>
+  ${tMode==='t2t'?`<div class="fg" style="margin-bottom:12px"><label>Describe the 3D object</label><textarea id="td-prompt" rows="3" placeholder="e.g. A medieval iron helmet with visor, battle-worn, detailed engravings, metallic surface..." style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea></div><div style="display:flex;gap:12px;margin-bottom:14px"><label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#C8C8E0;cursor:pointer"><input type="checkbox" id="td-pbr" checked> PBR Maps</label><label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#C8C8E0;cursor:pointer"><input type="checkbox" id="td-rig"> Auto-rig humanoid</label></div>`:''}
+  ${tMode==='i2t'||tMode==='multi'?`<div class="fg" style="margin-bottom:12px"><label>${tMode==='multi'?'Reference Images (up to 4 angles)':'Source Image'}</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${(S.tdImages||[]).map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.08)"><button onclick="S.tdImages.splice(${i},1);render()" style="position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;background:#EF4444;color:#fff;border:none;cursor:pointer;font-size:10px">x</button></div>`).join('')}${(!S.tdImages||S.tdImages.length<(tMode==='multi'?4:1))?`<div onclick="document.getElementById('td-img-upload').click()" style="width:72px;height:72px;border:2px dashed rgba(255,255,255,0.08);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:24px;color:#3a3a55">+</div>`:''}</div><input type="file" id="td-img-upload" accept="image/*" multiple style="display:none" onchange="loadTdImages(this)"></div><div class="fg" style="margin-bottom:14px"><label>Optional description</label><input type="text" id="td-prompt" placeholder="e.g. a ceramic vase..." style="width:100%;box-sizing:border-box"></div>`:''}
+  ${tMode==='retex'?`<div class="fg" style="margin-bottom:12px"><label>GLB Model URL</label><input type="text" id="td-glb-url" placeholder="https://...model.glb" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:8px;font-size:11px;box-sizing:border-box"></div><div class="fg" style="margin-bottom:14px"><label>Texture Style</label><input type="text" id="td-prompt" placeholder="e.g. worn medieval iron, rustic wood..." style="width:100%;box-sizing:border-box"></div>`:''}
+  <button id="td-gen-btn" onclick="run3DGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#06B6D4,#8B5CF6);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#11096; Generate 3D Model</button>
+  <div id="td-status" style="font-size:9px;color:#6B6B8A;text-align:center;margin-top:6px;display:none">Generating 3D... 1-5 minutes</div>
+</div>
+</div>
+<div>
+  <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">3D Results</div>
+  ${results.map(m3=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;margin-bottom:8px">${m3.preview?`<img src="${m3.preview}" style="width:100%;border-radius:6px;margin-bottom:8px">`:`<div style="width:100%;height:120px;background:rgba(6,182,212,0.05);border-radius:6px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#06B6D466">&#11096;</div>`}<div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:6px">${esc(m3.name||'3D Model')}</div><div style="display:flex;gap:6px"><a href="${m3.glb}" download style="flex:1;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; GLB</a>${m3.fbx?`<a href="${m3.fbx}" download style="font-size:10px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">FBX</a>`:''}</div></div>`).join('')}
+  ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#11096;</div><div style="font-size:11px">3D models appear here</div><div style="font-size:9px;margin-top:4px">Downloads as GLB / FBX / OBJ</div></div>`:''}
+</div>
+</div></div>`;
+}
+
+function loadTdImages(input){if(!S.tdImages)S.tdImages=[];Array.from(input.files).slice(0,4-S.tdImages.length).forEach(file=>{const r=new FileReader();r.onload=e=>{if(S.tdImages.length<4){S.tdImages.push(e.target.result);render();}};r.readAsDataURL(file);});}
+
+async function run3DGen(){
+  const k=kF();if(!k)return toast('Enter fal.ai key','err');
+  const modelId=document.getElementById('td-model')?.value||'fal-ai/meshy/v6/text-to-3d';
+  const prompt=document.getElementById('td-prompt')?.value?.trim()||'';
+  const tMode=S.tdMode||'t2t';
+  const btn=document.getElementById('td-gen-btn');const status=document.getElementById('td-status');
+  if(btn){btn.textContent='Generating...';btn.disabled=true;}if(status)status.style.display='block';aiStart();
+  try{
+    let body={};
+    const pbr=document.getElementById('td-pbr')?.checked!==false;
+    const rig=document.getElementById('td-rig')?.checked||false;
+    if(tMode==='t2t'){if(!prompt)throw new Error('Enter a prompt');body={prompt,enable_pbr:pbr,topology:'triangle',should_remesh:true,enable_rigging:rig};}
+    else if(tMode==='i2t'){const imgs=S.tdImages||[];if(!imgs.length)throw new Error('Upload an image');body={image_url:imgs[0],should_texture:true,enable_pbr:pbr};}
+    else if(tMode==='multi'){const imgs=S.tdImages||[];if(!imgs.length)throw new Error('Upload images');body={image_urls:imgs,should_texture:true,enable_pbr:pbr};}
+    else{const glbUrl=document.getElementById('td-glb-url')?.value?.trim();if(!glbUrl)throw new Error('Enter GLB URL');body={model_url:glbUrl,prompt};}
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,120));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+    for(let i=0;i<200;i++){
+      await sleep(4000);if(status)status.textContent='Generating 3D... '+Math.round(i*4/60)+'min';
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();
+      if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();
+        const glb=rd.model_mesh?.url||rd.model?.url||rd.url||'';const fbx=rd.rigged_model_fbx?.url||'';const preview=rd.thumbnail_url||rd.rendered_image?.url||'';
+        if(!glb)throw new Error('No GLB URL');if(!S.tdResults)S.tdResults=[];
+        S.tdResults.unshift({id:gid('td'),glb,fbx,preview,name:prompt.substring(0,40)||'3D Model',ts:new Date().toISOString()});
+        render();toast('3D model ready!','ok');return;}
+      if(ds.status==='FAILED')throw new Error('3D failed: '+(ds.error||''));
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('3D failed: '+e.message,'err');}finally{aiEnd();if(btn){btn.textContent='\u2BC8 Generate 3D Model';btn.disabled=false;}if(status)status.style.display='none';}
+}
+
 async function enhancePromptQG(){
   const el=document.getElementById('sg-prompt');const current=el?.value?.trim();
   if(!current)return toast('Enter a prompt first','err');
