@@ -4847,22 +4847,26 @@ async function fetchElVoices(){
 }
 
 function renderVoicePicker(){
-  const voices = S.elVoices || EL_VOICES;
+  const voices   = S.elVoices || EL_VOICES;
   const isLoaded = !!S.elVoices;
 
-  // Current filter state
-  const search   = S.sqgVSearch   || '';
-  const fGender  = S.sqgVGender   || '';
-  const fAccent  = S.sqgVAccent   || '';
-  const fAge     = S.sqgVAge      || '';
-  const fUse     = S.sqgVUse      || '';
-  const fLang    = S.sqgVLang     || '';
-  const selId    = S.sqgVoiceId   || voices[0]?.id || '21m00Tcm4TlvDq8ikWAM';
+  // Favourites — persisted to localStorage
+  const favs = _getFavVoices();
 
-  // Build unique option lists from loaded voices
+  // Filter state
+  const search  = S.sqgVSearch  || '';
+  const fGender = S.sqgVGender  || '';
+  const fAccent = S.sqgVAccent  || '';
+  const fAge    = S.sqgVAge     || '';
+  const fUse    = S.sqgVUse     || '';
+  const fLang   = S.sqgVLang    || '';
+  const fFav    = S.sqgVFav     || false;
+  const selId   = S.sqgVoiceId  || voices[0]?.id || '21m00Tcm4TlvDq8ikWAM';
+
+  // Unique filter values from loaded voices
   const accents  = [...new Set(voices.map(v=>v.accent||'').filter(Boolean))].sort();
   const ages     = [...new Set(voices.map(v=>v.age||'').filter(Boolean))].sort((a,b)=>{
-    const o={Young:0,'Middle Aged':1,Old:2,Mature:2}; return (o[a]??3)-(o[b]??3);
+    const o={Young:0,'Middle Aged':1,Old:2,Mature:2};return(o[a]??3)-(o[b]??3);
   });
   const useCases = [...new Set(voices.map(v=>v.use||'').filter(Boolean))].sort();
   const langs    = [...new Set(voices.map(v=>v.lang||'').filter(Boolean))].sort();
@@ -4880,32 +4884,36 @@ function renderVoicePicker(){
       && (!fAccent || v.accent === fAccent)
       && (!fAge    || v.age    === fAge)
       && (!fUse    || v.use    === fUse)
-      && (!fLang   || v.lang   === fLang);
+      && (!fLang   || v.lang   === fLang)
+      && (!fFav    || favs.includes(v.id));
   });
 
-  // Pill helper
-  const pill=(label,active,onclick)=>`<button onclick="${onclick}"
+  const activeCount = [fGender,fAccent,fAge,fUse,fLang].filter(Boolean).length + (fFav?1:0);
+
+  // Pill builder
+  const pill=(label,active,onclick,extra='')=>`<button onclick="${onclick}"
     style="padding:3px 10px;border-radius:12px;font-size:9px;font-weight:600;cursor:pointer;
     white-space:nowrap;transition:all 0.12s;
     border:1px solid ${active?'rgba(255,107,53,0.5)':'rgba(255,255,255,0.08)'};
     background:${active?'rgba(255,107,53,0.15)':'rgba(255,255,255,0.02)'};
-    color:${active?'#FF6B35':'#6B6B8A'}">${label}</button>`;
-
-  // Active filter count
-  const activeCount=[fGender,fAccent,fAge,fUse,fLang].filter(Boolean).length;
+    color:${active?'#FF6B35':'#6B6B8A'};${extra}">${label}</button>`;
 
   return`<div>
-    <!-- Search bar + load button -->
+    <!-- Search + Load + Clear -->
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
       <div style="position:relative;flex:1">
         <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#3a3a55;font-size:11px">🔍</span>
         <input type="text" id="sq-voice-search" value="${esc(search)}"
-          placeholder="Search ${voices.length} voices — name, accent, use case..."
+          placeholder="Search ${voices.length} voices — name, accent, style..."
           oninput="S.sqgVSearch=this.value;render()"
           style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
           border-radius:7px;color:#C8C8E0;padding:6px 8px 6px 26px;font-size:10px;box-sizing:border-box"/>
       </div>
-      ${activeCount?pill('✕ Clear ('+activeCount+')','fGender||fAccent||fAge||fUse||fLang',"S.sqgVGender='';S.sqgVAccent='';S.sqgVAge='';S.sqgVUse='';S.sqgVLang='';render()"):''}
+      ${activeCount?`<button onclick="S.sqgVGender='';S.sqgVAccent='';S.sqgVAge='';S.sqgVUse='';S.sqgVLang='';S.sqgVFav=false;render()"
+        style="white-space:nowrap;font-size:9px;padding:5px 9px;border-radius:6px;cursor:pointer;
+        background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#EF4444">
+        ✕ Clear (${activeCount})
+      </button>`:''}
       ${!isLoaded?`<button id="sq-load-voices" onclick="fetchElVoices()"
         style="white-space:nowrap;font-size:9px;padding:5px 10px;border-radius:6px;cursor:pointer;
         background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#10B981">
@@ -4913,9 +4921,27 @@ function renderVoicePicker(){
       </button>`:''}
     </div>
 
-    <!-- Filter rows -->
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;
-      padding:10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px">
+    <!-- Filter panel -->
+    <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;
+      padding:10px 12px;background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.06);border-radius:8px">
+
+      <!-- ★ Favourites row — most prominent -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:9px;color:#3a3a55;font-weight:700;text-transform:uppercase;
+          letter-spacing:0.05em;min-width:52px">Favs</span>
+        <button onclick="S.sqgVFav=!S.sqgVFav;render()"
+          style="padding:3px 12px;border-radius:12px;font-size:9px;font-weight:700;cursor:pointer;
+          white-space:nowrap;transition:all 0.12s;
+          border:1px solid ${fFav?'rgba(245,158,11,0.5)':'rgba(255,255,255,0.08)'};
+          background:${fFav?'rgba(245,158,11,0.15)':'rgba(255,255,255,0.02)'};
+          color:${fFav?'#F59E0B':'#6B6B8A'}">
+          ${fFav?'★':'☆'} Favourites ${favs.length?`(${favs.length})`:''}
+        </button>
+        ${fFav&&!favs.length?`<span style="font-size:9px;color:#3a3a55;font-style:italic">
+          No favourites yet — click ♡ on any voice below
+        </span>`:''}
+      </div>
 
       <!-- Gender -->
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -4942,57 +4968,124 @@ function renderVoicePicker(){
         ${accents.map(a=>pill(a,fAccent===a,`S.sqgVAccent='${a}';render()`)).join('')}
       </div>
 
-      <!-- Use case -->
+      <!-- Use Case -->
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="font-size:9px;color:#3a3a55;font-weight:700;text-transform:uppercase;
-          letter-spacing:0.05em;min-width:52px">Use Case</span>
+          letter-spacing:0.05em;min-width:52px">Use</span>
         ${pill('All',!fUse,"S.sqgVUse='';render()")}
         ${useCases.map(u=>pill(u,fUse===u,`S.sqgVUse='${u}';render()`)).join('')}
       </div>
 
-      <!-- Language (only show if we have multi-language voices) -->
+      <!-- Language -->
       ${langs.length>1?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="font-size:9px;color:#3a3a55;font-weight:700;text-transform:uppercase;
-          letter-spacing:0.05em;min-width:52px">Language</span>
+          letter-spacing:0.05em;min-width:52px">Lang</span>
         ${pill('All',!fLang,"S.sqgVLang='';render()")}
         ${pill('English',fLang==='en',"S.sqgVLang='en';render()")}
-        ${pill('Multi-lingual',fLang==='multi',"S.sqgVLang='multi';render()")}
-        ${langs.filter(l=>l!=='en'&&l!=='multi').map(l=>pill(l.toUpperCase(),fLang===l,`S.sqgVLang='${l}';render()`)).join('')}
+        ${pill('Multi',fLang==='multi',"S.sqgVLang='multi';render()")}
       </div>`:''}
     </div>
 
-    <!-- Voice count + result select -->
-    <div style="font-size:9px;color:#6B6B8A;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+    <!-- Result count -->
+    <div style="font-size:9px;color:#6B6B8A;margin-bottom:6px;
+      display:flex;justify-content:space-between;align-items:center">
       <span>${filtered.length} voice${filtered.length!==1?'s':''} ${filtered.length<voices.length?'matching filters':'total'}</span>
-      ${isLoaded?`<span style="color:#10B981">✓ ${voices.length} loaded</span>`:`<span style="color:#3a3a55;cursor:pointer" onclick="fetchElVoices()">Load cloned voices →</span>`}
+      ${isLoaded
+        ?`<span style="color:#10B981">✓ ${voices.length} voices loaded</span>`
+        :`<span style="color:#3a3a55;cursor:pointer" onclick="fetchElVoices()">↓ Load your cloned voices</span>`}
     </div>
 
-    <!-- Voice select (scrollable) -->
-    <select id="sq-voice" onchange="S.sqgVoiceId=this.value"
-      size="6"
-      style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);
-      border-radius:8px;color:#C8C8E0;font-size:11px;padding:4px">
-      ${filtered.length?filtered.slice(0,150).map(v=>`<option value="${v.id}"${selId===v.id?' selected':''}
-        style="padding:5px 8px">${esc(v.n)}${v.gender?' ('+v.gender+')':''}${v.accent?' · '+v.accent:''}${v.age?' · '+v.age:''}${v.desc?' — '+v.desc.substring(0,28)+'':(v.use?' — '+v.use:'')}</option>`).join('')
-        :`<option disabled>No voices match these filters — try clearing some</option>`}
-      ${filtered.length>150?`<option disabled>... ${filtered.length-150} more — use search to narrow</option>`:''}
-    </select>
+    <!-- Voice list with heart buttons -->
+    <div style="display:flex;flex-direction:column;gap:3px;max-height:220px;overflow-y:auto;
+      background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:4px">
+      ${filtered.length
+        ? filtered.slice(0,150).map(v=>{
+          const isSel  = selId===v.id;
+          const isFav  = favs.includes(v.id);
+          const tags   = [v.gender==='F'?'Female':v.gender==='M'?'Male':'', v.accent, v.age].filter(Boolean).join(' · ');
+          return`<div onclick="S.sqgVoiceId='${v.id}';document.getElementById('sq-voice-hidden').value='${v.id}';render()"
+            style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;
+            transition:background 0.1s;
+            background:${isSel?'rgba(255,107,53,0.12)':'transparent'};
+            border:1px solid ${isSel?'rgba(255,107,53,0.35)':'transparent'}"
+            onmouseenter="if(!${isSel})this.style.background='rgba(255,255,255,0.04)'"
+            onmouseleave="this.style.background='${isSel?'rgba(255,107,53,0.12)':'transparent'}'">
+            <!-- Fav heart -->
+            <button onclick="event.stopPropagation();toggleFavVoice('${v.id}')"
+              style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;
+              line-height:1;color:${isFav?'#F59E0B':'#3a3a55'};flex-shrink:0;
+              transition:transform 0.15s,color 0.15s"
+              onmouseenter="this.style.transform='scale(1.3)'"
+              onmouseleave="this.style.transform='scale(1)'">
+              ${isFav?'★':'☆'}
+            </button>
+            <!-- Voice info -->
+            <div style="flex:1;min-width:0">
+              <div style="font-size:11px;font-weight:${isSel?'700':'500'};
+                color:${isSel?'#FF6B35':'#C8C8E0'};line-height:1.2">${esc(v.n)}</div>
+              ${tags||v.use?`<div style="font-size:9px;color:#6B6B8A;margin-top:1px">
+                ${tags}${v.use&&tags?' — ':v.use?'':''}${v.use||''}
+              </div>`:''}
+            </div>
+            <!-- Desc chip -->
+            ${v.desc?`<span style="font-size:8px;color:#3a3a55;white-space:nowrap;
+              padding:2px 6px;border-radius:8px;background:rgba(255,255,255,0.04)">
+              ${esc(v.desc.substring(0,20))}
+            </span>`:''}
+            <!-- Selected tick -->
+            ${isSel?`<span style="color:#FF6B35;font-size:12px;flex-shrink:0">✓</span>`:''}
+          </div>`;
+        }).join('')
+        : `<div style="padding:20px;text-align:center;color:#3a3a55;font-size:10px">
+            ${fFav?'No favourite voices yet — click ☆ on any voice to add it':'No voices match these filters'}
+          </div>`}
+      ${filtered.length>150?`<div style="padding:6px;text-align:center;font-size:9px;color:#3a3a55">
+        +${filtered.length-150} more — use search or filters to narrow
+      </div>`:''}
+    </div>
+    <!-- Hidden input carries selected voice ID to runTTSGen -->
+    <input type="hidden" id="sq-voice" value="${selId}">
 
-    <!-- Selected voice preview -->
-    ${(()=>{const sv=filtered.find(v=>v.id===selId)||filtered[0];return sv?`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;
-      padding:8px 12px;background:rgba(255,107,53,0.06);border:1px solid rgba(255,107,53,0.2);border-radius:7px">
-      <div>
-        <span style="font-size:11px;font-weight:700;color:#FF6B35">${esc(sv.n)}</span>
-        <span style="font-size:9px;color:#6B6B8A;margin-left:6px">${[sv.gender==='F'?'Female':sv.gender==='M'?'Male':'',sv.accent,sv.age,sv.use].filter(Boolean).join(' · ')}</span>
-      </div>
-      ${sv.desc?`<span style="font-size:9px;color:#3a3a55;font-style:italic">${esc(sv.desc)}</span>`:''}
-    </div>`:'';})()}
+    <!-- Selected voice summary bar -->
+    ${(()=>{
+      const sv = (filtered.find(v=>v.id===selId)) || voices.find(v=>v.id===selId);
+      if(!sv)return'';
+      const isFav=favs.includes(sv.id);
+      return`<div style="display:flex;align-items:center;gap:8px;margin-top:8px;
+        padding:8px 12px;border-radius:7px;
+        background:rgba(255,107,53,0.06);border:1px solid rgba(255,107,53,0.2)">
+        <button onclick="toggleFavVoice('${sv.id}')"
+          style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;
+          color:${isFav?'#F59E0B':'#6B6B8A'};transition:all 0.15s"
+          title="${isFav?'Remove from favourites':'Add to favourites'}"
+          onmouseenter="this.style.transform='scale(1.2)'"
+          onmouseleave="this.style.transform='scale(1)'">
+          ${isFav?'★':'☆'}
+        </button>
+        <div style="flex:1">
+          <span style="font-size:11px;font-weight:700;color:#FF6B35">${esc(sv.n)}</span>
+          <span style="font-size:9px;color:#6B6B8A;margin-left:6px">
+            ${[sv.gender==='F'?'Female':sv.gender==='M'?'Male':'',sv.accent,sv.age,sv.use].filter(Boolean).join(' · ')}
+          </span>
+        </div>
+        ${sv.desc?`<span style="font-size:9px;color:#3a3a55;font-style:italic">${esc(sv.desc)}</span>`:''}
+      </div>`;
+    })()}
   </div>`;
 }
 
-// Also update the voice_id passed to runTTSGen to use S.sqgVoiceId
-// ══ END VOICE LIBRARY ════════════════════════════════════════════
+// ── Favourite voice helpers ──────────────────────────────────────
+function _getFavVoices(){
+  try{return JSON.parse(localStorage.getItem('sv2_fav_voices')||'[]');}catch(e){return[];}
+}
+function toggleFavVoice(voiceId){
+  const favs=_getFavVoices();
+  const idx=favs.indexOf(voiceId);
+  if(idx>=0)favs.splice(idx,1);else favs.unshift(voiceId);
+  _tryLS(()=>localStorage.setItem('sv2_fav_voices',JSON.stringify(favs)));
+  render();
+  toast(idx>=0?'Removed from favourites':'★ Added to favourites','ok');
+}
 
 async function runTTSGen(){
   const text=document.getElementById('sq-text')?.value?.trim();if(!text)return toast('Enter a script','err');
