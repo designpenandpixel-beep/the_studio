@@ -161,7 +161,7 @@ const VEO_RULES=[
 // ══════════════════════════════════════
 // DATA LAYER — in-memory cache + localStorage fallback + Supabase sync
 // ══════════════════════════════════════
-let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[], _pmChats=[], _pmMemory={};
+let _users=[], _projects=[], _session=null, _notifs=[], _integrations=[], _ldEntries=[], _pms=[], _pmChats=[], _pmMemory={}, _customModels=[];
 function _tryLS(fn){try{fn()}catch(e){console.warn('localStorage error:',e.message);}}
 
 // Debounce utility — delays fn execution until wait ms after last call
@@ -182,6 +182,7 @@ function _loadLS(){
   _tryLS(()=>{const s=JSON.parse(localStorage.getItem('sv2_session')||'null');if(s&&new Date(s.exp)>new Date())_session=s;});
   _tryLS(()=>{const n=localStorage.getItem('sv2_notifs');if(n)_notifs=JSON.parse(n)});
   _tryLS(()=>{const i=localStorage.getItem('sv2_integrations');if(i)_integrations=JSON.parse(i)});
+  _tryLS(()=>{const m=localStorage.getItem('sv2_custom_models');if(m)_customModels=JSON.parse(m)});
   _tryLS(()=>{const l=localStorage.getItem('sv2_ld');if(l)_ldEntries=JSON.parse(l)});
   _tryLS(()=>{const c=localStorage.getItem('sv2_pmchats');if(c)_pmChats=JSON.parse(c)});
   _tryLS(()=>{const m=localStorage.getItem('sv2_pmmem');if(m)_pmMemory=JSON.parse(m)});
@@ -557,6 +558,16 @@ const DB={
     _tryLS(()=>localStorage.setItem('sv2_notifs',JSON.stringify(_notifs)));
   },
   getIntegrations:()=>_integrations,
+  getCustomModels:()=>_customModels,
+  saveCustomModel:(m)=>{
+    const idx=_customModels.findIndex(x=>x.id===m.id);
+    if(idx>=0)_customModels[idx]=m;else _customModels.push(m);
+    _tryLS(()=>localStorage.setItem('sv2_custom_models',JSON.stringify(_customModels)));
+  },
+  deleteCustomModel:(id)=>{
+    _customModels=_customModels.filter(m=>m.id!==id);
+    _tryLS(()=>localStorage.setItem('sv2_custom_models',JSON.stringify(_customModels)));
+  },
   saveIntegration:(intg)=>{
     const i=_integrations.findIndex(x=>x.id===intg.id);
     if(i>=0)_integrations[i]=intg;else _integrations.unshift(intg);
@@ -4344,6 +4355,19 @@ function loadStyleRef(input){const file=input.files[0];if(!file)return;const rea
 // ════════════════════════════════════════════════════════════
 // VIDEO GENERATION PAGE — Auto / Cinema Mode
 // ════════════════════════════════════════════════════════════
+// Merged model list — default + admin custom models
+function getVideoModels(){
+  const custom=DB.getCustomModels().filter(m=>m.category==='video'&&m.active!==false);
+  const customTop=custom.filter(m=>m.pinTop);
+  const customBottom=custom.filter(m=>!m.pinTop);
+  return [...customTop,...QG_VID_MODELS,...customBottom];
+}
+function getTTSModels(){
+  const custom=DB.getCustomModels().filter(m=>m.category==='tts'&&m.active!==false);
+  return [...custom,...QG_TTS_MODELS];
+}
+function getImageModels(){ return IMG_MODELS; }
+
 const QG_VID_MODELS=[
   // ── Kling 3.0 (Latest — March 2026) ─────────────────────────────────────
   {id:'fal-ai/kling-video/v3/pro/text-to-video',n:'Kling 3.0 Pro',mode:['t2v'],dur:[5,10,15],ratio:['16:9','9:16','1:1'],desc:'Latest — native audio, multi-shot, cinematic',cost:'~$0.90/5s',badge:'NEW'},
@@ -4406,8 +4430,8 @@ function videoGenPage(){
   const vMode=S.vqgMode||'t2v';
   const cinMode=S.vqgCinMode!==false; // true = Cinema, false = Auto
   const selModelId=S.vqgModel||(vMode==='i2v'?QG_VID_MODELS.find(m=>m.mode.includes('i2v'))?.id:QG_VID_MODELS[0].id);
-  const selModel=QG_VID_MODELS.find(m=>m.id===selModelId)||QG_VID_MODELS[0];
-  const availModels=QG_VID_MODELS.filter(m=>m.mode.includes(vMode));
+  const _allVidModels=getVideoModels();const selModel=_allVidModels.find(m=>m.id===selModelId)||_allVidModels[0];
+  const availModels=getVideoModels().filter(m=>m.mode&&m.mode.includes(vMode));
   const results=S.vqgResults||[];
 
   const subTab=(k,lbl)=>`<button onclick="S.vqgMode='${k}';S.vqgModel=null;render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${vMode===k?'rgba(139,92,246,0.5)':'rgba(255,255,255,0.07)'};background:${vMode===k?'rgba(139,92,246,0.1)':'transparent'};color:${vMode===k?'#8B5CF6':'#6B6B8A'};transition:all 0.15s">${lbl}</button>`;
@@ -4663,8 +4687,8 @@ const EL_VOICES=[{id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel — Calm, narrative'},{id:
 
 function soundGenPage(){
   const sMode=S.sqgMode||'tts';
-  const selModelId=S.sqgModel||QG_TTS_MODELS[0].id;
-  const selModel=QG_TTS_MODELS.find(m=>m.id===selModelId)||QG_TTS_MODELS[0];
+  const _allTTSModels=getTTSModels();const selModelId=S.sqgModel||_allTTSModels[0].id;
+  const selModel=_allTTSModels.find(m=>m.id===selModelId)||_allTTSModels[0];
   const results=S.sqgResults||[];
   const subTab=(k,lbl,ico)=>`<button onclick="S.sqgMode='${k}';render()" style="padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid ${sMode===k?'rgba(16,185,129,0.5)':'rgba(255,255,255,0.07)'};background:${sMode===k?'rgba(16,185,129,0.1)':'transparent'};color:${sMode===k?'#10B981':'#6B6B8A'};transition:all 0.15s">${ico} ${lbl}</button>`;
   return`<div style="max-width:900px">
@@ -4674,7 +4698,7 @@ function soundGenPage(){
 ${sMode==='tts'?`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:18px">
   <div class="fg" style="margin-bottom:12px"><label>Script</label><textarea id="sq-text" rows="5" placeholder="Type your voiceover script..." oninput="S.sqgText=this.value" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit">${S.sqgText||''}</textarea></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-    <div class="fg"><label>Model</label><select id="sq-model" onchange="S.sqgModel=this.value;render()">${QG_TTS_MODELS.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
+    <div class="fg"><label>Model</label><select id="sq-model" onchange="S.sqgModel=this.value;render()">${_allTTSModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
     <div class="fg"><label>Voice</label>${selModel.feature==='voice_id'?`<select id="sq-voice">${EL_VOICES.map(v=>`<option value="${v.id}">${v.n}</option>`).join('')}</select>`:selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah F (US)</option><option value="am_adam">Adam M (US)</option><option value="bf_emma">Emma F (UK)</option></select>`:`<div style="font-size:10px;color:#6B6B8A;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">Uses reference audio below</div>`}</div>
   </div>
   ${selModel.feature==='clone'?`<div class="fg" style="margin-bottom:12px"><label>Reference Audio (for cloning)</label><div onclick="document.getElementById('sq-ref-audio').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:14px;text-align:center;cursor:pointer"><div style="font-size:9px;color:#6B6B8A">${S.sqgRefAudioName||'Upload 10+ second audio sample'}</div></div><input type="file" id="sq-ref-audio" accept="audio/*" style="display:none" onchange="loadSqRefAudio(this)"></div>`:''}
@@ -5509,6 +5533,298 @@ async function checkLoRAStatus(id){
   }catch(er){toast('Check failed: '+er.message,'err');}
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN MODEL MANAGEMENT
+// ══════════════════════════════════════════════════════════════════
+
+const MODEL_CATEGORIES = [
+  {k:'video',l:'Video',icon:'🎬',hint:'fal-ai/model-name/endpoint'},
+  {k:'tts',  l:'Voice/TTS',icon:'🎙',hint:'fal-ai/elevenlabs/tts/model-name'},
+  {k:'image',l:'Image',icon:'🖼',hint:'fal-ai/flux-pro/v1.1-ultra'},
+  {k:'3d',   l:'3D',icon:'⬡',hint:'fal-ai/meshy/v6/text-to-3d'},
+  {k:'motion',l:'Motion',icon:'⚡',hint:'fal-ai/kling-video/v3/pro/image-to-video'},
+];
+const MODEL_MODE_OPTS = {
+  video: ['t2v','i2v','both'],
+  tts:   ['tts','clone'],
+  image: ['t2i','i2i'],
+  '3d':  ['t2t','i2t','multi','retex'],
+  motion:['effect','transition','animate','t2v'],
+};
+
+function adminModelsCard(){
+  const customModels = DB.getCustomModels();
+  const selCat = S.modelsCat||'video';
+  const catModels = customModels.filter(m=>m.category===selCat);
+
+  return`<div class="card" style="margin-bottom:14px">
+  <div class="card-head" style="display:flex;align-items:center;justify-content:space-between">
+    <span class="card-title">⚡ AI MODELS</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button onclick="checkFalNewModels()" class="btn btn-ghost btn-sm" style="font-size:9px">
+        🔍 Check fal.ai for new
+      </button>
+      <button onclick="showAddModelModal()" class="btn btn-gold btn-sm" style="font-size:9px">
+        + Add Model
+      </button>
+    </div>
+  </div>
+  <div class="card-body">
+    <div style="font-size:10px;color:var(--t4);margin-bottom:12px">
+      Add custom models here — they appear <strong style="color:var(--t2)">immediately</strong> in the AI Studio without any code changes or redeployment.
+    </div>
+    <!-- Category tabs -->
+    <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
+      ${MODEL_CATEGORIES.map(cat=>`<button onclick="S.modelsCat='${cat.k}';render()" 
+        style="padding:4px 12px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;
+        border:1px solid ${selCat===cat.k?'rgba(255,107,53,0.5)':'rgba(255,255,255,0.08)'};
+        background:${selCat===cat.k?'rgba(255,107,53,0.12)':'transparent'};
+        color:${selCat===cat.k?'#FF6B35':'#6B6B8A'}">
+        ${cat.icon} ${cat.l} ${customModels.filter(m=>m.category===cat.k).length?
+          `<span style="background:rgba(255,107,53,0.2);color:#FF6B35;border-radius:8px;padding:0 5px;font-size:8px">${customModels.filter(m=>m.category===cat.k).length}</span>`:''}
+      </button>`).join('')}
+    </div>
+    <!-- Custom models list -->
+    ${catModels.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+      ${catModels.map(m=>`<div style="display:flex;align-items:center;justify-content:space-between;
+        padding:10px 14px;border-radius:8px;
+        border:1px solid ${m.active!==false?'rgba(255,107,53,0.2)':'rgba(255,255,255,0.06)'};
+        background:${m.active!==false?'rgba(255,107,53,0.04)':'rgba(255,255,255,0.01)'}">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+            <span style="font-size:11px;font-weight:700;color:${m.active!==false?'#F0F0FF':'#6B6B8A'}">${esc(m.name)}</span>
+            ${m.badge?`<span style="font-size:8px;background:rgba(16,185,129,0.15);color:#10B981;padding:1px 5px;border-radius:3px;font-weight:700">${m.badge}</span>`:''}
+            ${m.pinTop?'<span style="font-size:8px;color:#F59E0B">📌 top</span>':''}
+          </div>
+          <div style="font-size:9px;color:#3a3a55;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.endpoint||m.id||'')}</div>
+          ${m.cost?`<div style="font-size:9px;color:#F59E0B;margin-top:1px">${esc(m.cost)}</div>`:''}
+        </div>
+        <div style="display:flex;gap:4px;margin-left:10px">
+          <button onclick="toggleCustomModel('${m.id}')" 
+            class="btn btn-${m.active!==false?'red':'green'} btn-sm" style="font-size:9px">
+            ${m.active!==false?'Hide':'Show'}
+          </button>
+          <button onclick="showEditModelModal('${m.id}')" class="btn btn-ghost btn-sm" style="font-size:9px">Edit</button>
+          <button onclick="deleteCustomModel('${m.id}')" class="btn btn-red btn-sm" style="font-size:9px">✕</button>
+        </div>
+      </div>`).join('')}
+    </div>` : `<div style="padding:16px;text-align:center;color:#3a3a55;font-size:10px;
+      border:1px dashed rgba(255,255,255,0.06);border-radius:8px;margin-bottom:12px">
+      No custom ${selCat} models yet. Click <strong>+ Add Model</strong> to add one.
+    </div>`}
+    <!-- Default models (read-only reference) -->
+    <details style="margin-top:4px">
+      <summary style="font-size:9px;color:#6B6B8A;cursor:pointer;padding:4px 0">
+        View ${selCat==='video'?QG_VID_MODELS.length:selCat==='tts'?QG_TTS_MODELS.length:'—'} built-in ${selCat} models (read-only)
+      </summary>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;opacity:0.6">
+        ${selCat==='video'?QG_VID_MODELS.map(m=>`<div style="padding:6px 10px;border-radius:6px;background:rgba(255,255,255,0.02);font-size:9px;color:#6B6B8A;display:flex;justify-content:space-between">
+          <span>${esc(m.n)}</span><span style="font-family:monospace;color:#3a3a55">${m.id}</span></div>`).join(''):
+        selCat==='tts'?QG_TTS_MODELS.map(m=>`<div style="padding:6px 10px;border-radius:6px;background:rgba(255,255,255,0.02);font-size:9px;color:#6B6B8A;display:flex;justify-content:space-between">
+          <span>${esc(m.n)}</span><span style="font-family:monospace;color:#3a3a55">${m.id}</span></div>`).join(''):''}
+      </div>
+    </details>
+  </div>
+</div>`;
+}
+
+function showAddModelModal(existingId){
+  const existing = existingId ? DB.getCustomModels().find(m=>m.id===existingId) : null;
+  const cat = existing?.category || S.modelsCat || 'video';
+  const modeOpts = MODEL_MODE_OPTS[cat]||['t2v','i2v'];
+
+  openModal(`<div class="modal-title">${existing?'Edit':'Add'} Custom Model</div>
+<div class="fg"><label>Display Name</label>
+  <input type="text" id="cm-name" value="${esc(existing?.name||'')}" placeholder="e.g. Kling 4.0 Pro"/></div>
+<div class="fg"><label>fal.ai Endpoint ID</label>
+  <input type="text" id="cm-endpoint" value="${esc(existing?.endpoint||existing?.id||'')}" 
+    placeholder="${esc(MODEL_CATEGORIES.find(c=>c.k===cat)?.hint||'fal-ai/...')}"/>
+  <div style="font-size:9px;color:#6B6B8A;margin-top:3px">
+    Find endpoint IDs at <a href="https://fal.ai/explore/models" target="_blank" style="color:#FF6B35">fal.ai/explore</a>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  <div class="fg"><label>Category</label>
+    <select id="cm-cat">
+      ${MODEL_CATEGORIES.map(c=>`<option value="${c.k}"${cat===c.k?' selected':''}>${c.icon} ${c.l}</option>`).join('')}
+    </select>
+  </div>
+  <div class="fg"><label>Mode</label>
+    <select id="cm-mode">
+      ${modeOpts.map(m=>`<option value="${m}"${(existing?.mode?.includes(m)||modeOpts[0]===m)?' selected':''}>${m}</option>`).join('')}
+    </select>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  <div class="fg"><label>Est. Cost per gen <span style="font-weight:400;color:#6B6B8A">(optional)</span></label>
+    <input type="text" id="cm-cost" value="${esc(existing?.cost||'')}" placeholder="e.g. ~$0.90/5s"/></div>
+  <div class="fg"><label>Badge <span style="font-weight:400;color:#6B6B8A">(NEW / UPDATED)</span></label>
+    <input type="text" id="cm-badge" value="${esc(existing?.badge||'')}" placeholder="NEW"/></div>
+</div>
+<div class="fg"><label>Description <span style="font-weight:400;color:#6B6B8A">(optional)</span></label>
+  <input type="text" id="cm-desc" value="${esc(existing?.desc||'')}" placeholder="Short description for creators"/></div>
+<div style="display:flex;gap:12px;margin-bottom:14px">
+  <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+    <input type="checkbox" id="cm-pintop" ${existing?.pinTop?'checked':''}>
+    <span>📌 Pin to top of list</span>
+  </label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+    <input type="checkbox" id="cm-active" ${existing?.active!==false?'checked':''}>
+    <span>Active (visible to creators)</span>
+  </label>
+</div>
+<div class="btn-row">
+  <button class="btn btn-gold" onclick="saveCustomModel('${existing?.id||''}')">
+    ${existing?'Save Changes':'Add Model'}
+  </button>
+  <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+</div>`);
+}
+
+function showEditModelModal(id){ showAddModelModal(id); }
+
+function saveCustomModel(existingId){
+  const name = document.getElementById('cm-name')?.value.trim();
+  if(!name){ toast('Model name required','err'); return; }
+  const endpoint = document.getElementById('cm-endpoint')?.value.trim();
+  if(!endpoint){ toast('Endpoint ID required','err'); return; }
+  const cat = document.getElementById('cm-cat')?.value||'video';
+  const mode = document.getElementById('cm-mode')?.value||'t2v';
+  const cost = document.getElementById('cm-cost')?.value.trim()||'';
+  const badge = document.getElementById('cm-badge')?.value.trim()||'';
+  const desc = document.getElementById('cm-desc')?.value.trim()||'';
+  const pinTop = document.getElementById('cm-pintop')?.checked||false;
+  const active = document.getElementById('cm-active')?.checked!==false;
+
+  const id = existingId || gid('cm');
+  // Build model object matching QG_VID_MODELS shape
+  const model = {
+    id: endpoint, // use endpoint as id for compatibility
+    _dbId: id,
+    name, n: name, endpoint,
+    category: cat,
+    mode: cat==='video'?[mode]:undefined,
+    feature: cat==='tts'?mode:undefined,
+    desc, cost, badge, pinTop, active,
+    addedAt: existingId ? undefined : new Date().toISOString(),
+  };
+  if(cat==='video') model.ratio=['16:9','9:16','1:1'];
+  if(cat==='video') model.dur=[5,10];
+
+  DB.saveCustomModel({...model, id});
+  closeModal(); render();
+  toast(`Model "${name}" ${existingId?'updated':'added'} — available immediately in AI Studio ✓`,'ok');
+}
+
+function toggleCustomModel(id){
+  const m = DB.getCustomModels().find(x=>x.id===id); if(!m) return;
+  m.active = m.active===false ? true : false;
+  DB.saveCustomModel(m); render();
+  toast(m.active?'Model shown in Studio':'Model hidden from Studio','ok');
+}
+
+function deleteCustomModel(id){
+  if(!confirm('Remove this custom model?')) return;
+  DB.deleteCustomModel(id); render();
+  toast('Model removed','ok');
+}
+
+// ── Check fal.ai blog for new models ──────────────────────────────
+async function checkFalNewModels(){
+  toast('Checking fal.ai for latest models...','ok');
+  try{
+    // Fetch fal.ai blog via our Claude API to summarise new models
+    const result = await callClaude(
+      'You are a helpful assistant that tracks AI model releases. Return a JSON array only — no markdown, no explanation.',
+      `Today is ${new Date().toLocaleDateString()}. List the 8 most recently released video and audio AI models on fal.ai. 
+For each include: {name, endpoint_id (e.g. fal-ai/model-name), category (video|tts|image|3d), desc, estimated_cost, is_new}.
+Focus on: Kling, MiniMax Hailuo, Wan, ElevenLabs, Veo, Runway, Luma, Seedance, LTX.
+Return only valid JSON array.`,
+      800
+    );
+    const models = JSON.parse(result.replace(/```json|```/g,'').trim());
+    showNewModelsModal(models);
+  }catch(e){
+    // Fallback: show manual check guidance
+    openModal(`<div class="modal-title">🔍 Check for New Models</div>
+<div style="font-size:11px;color:#C8C8E0;margin-bottom:14px">
+  Visit these pages to find new model IDs, then use <strong>+ Add Model</strong> to add them:
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+  ${[
+    ['fal.ai Explore','https://fal.ai/explore/models','Browse all models'],
+    ['fal.ai Blog','https://blog.fal.ai','New model announcements'],
+    ['ElevenLabs','https://elevenlabs.io/developers','TTS models'],
+    ['Kling releases','https://fal.ai/models?q=kling','Latest Kling versions'],
+  ].map(([name,url,desc])=>`<a href="${url}" target="_blank" 
+    style="display:flex;align-items:center;justify-content:space-between;
+    padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.02);text-decoration:none;transition:border-color 0.15s"
+    onmouseenter="this.style.borderColor='rgba(255,107,53,0.4)'"
+    onmouseleave="this.style.borderColor='rgba(255,255,255,0.08)'">
+    <div>
+      <div style="font-size:11px;font-weight:700;color:#F0F0FF">${name}</div>
+      <div style="font-size:9px;color:#6B6B8A">${desc}</div>
+    </div>
+    <span style="color:#FF6B35;font-size:12px">→</span>
+  </a>`).join('')}
+</div>
+<div class="btn-row" style="margin-top:14px">
+  <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+</div>`);
+  }
+}
+
+function showNewModelsModal(models){
+  if(!models||!models.length){toast('No new models found','ok');return;}
+  openModal(`<div class="modal-title">✦ New Models on fal.ai</div>
+<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+  ${models.map(m=>{
+    const already = DB.getCustomModels().find(x=>x.endpoint===m.endpoint_id) || 
+                    QG_VID_MODELS.find(x=>x.id===m.endpoint_id) ||
+                    QG_TTS_MODELS.find(x=>x.id===m.endpoint_id);
+    return `<div style="display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border-radius:8px;
+      border:1px solid ${already?'rgba(16,185,129,0.2)':'rgba(255,255,255,0.08)'};
+      background:${already?'rgba(16,185,129,0.04)':'rgba(255,255,255,0.02)'}">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:700;color:#F0F0FF;margin-bottom:2px">${esc(m.name||'')}
+          ${m.is_new?'<span style="font-size:8px;background:rgba(16,185,129,0.15);color:#10B981;padding:1px 5px;border-radius:3px;margin-left:4px">NEW</span>':''}
+        </div>
+        <div style="font-size:9px;color:#3a3a55;font-family:monospace">${esc(m.endpoint_id||'')}</div>
+        ${m.estimated_cost?`<div style="font-size:9px;color:#F59E0B">${esc(m.estimated_cost)}</div>`:''}
+      </div>
+      ${already?'<span style="font-size:9px;color:#10B981;white-space:nowrap">✓ Already have it</span>':
+        `<button onclick="quickAddModel(${JSON.stringify(m).replace(/"/g,'&quot;')})" 
+          class="btn btn-outline btn-sm" style="font-size:9px;white-space:nowrap;
+          border-color:rgba(255,107,53,0.4);color:#FF6B35">+ Add</button>`}
+    </div>`;
+  }).join('')}
+</div>
+<div class="btn-row">
+  <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+</div>`);
+}
+
+function quickAddModel(m){
+  const model = {
+    id: m.endpoint_id,
+    name: m.name, n: m.name, endpoint: m.endpoint_id,
+    category: m.category||'video',
+    mode: m.category==='video'?['t2v','i2v']:undefined,
+    feature: m.category==='tts'?'voice_id':undefined,
+    desc: m.desc||'', cost: m.estimated_cost||'', badge:'NEW',
+    pinTop: true, active: true,
+    ratio: ['16:9','9:16','1:1'], dur: [5,10],
+    addedAt: new Date().toISOString(),
+  };
+  DB.saveCustomModel(model);
+  closeModal(); render();
+  toast(`"${m.name}" added to AI Studio ✓`,'ok');
+}
+// ══ END MODEL MANAGEMENT ═════════════════════════════════════════
+
 function adminSettings(){
   const u=DB.getUser(S.session?.userId)||{};
   const sheetsUrl=u.sheetsUrl||'';
@@ -5577,6 +5893,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 <div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-outline btn-sm" style="font-size:9px" onclick="testFalKey()">Test fal.ai</button><button class="btn btn-outline btn-sm" style="font-size:9px" onclick="testClaudeKey()">Test Claude</button></div><div id="api-test-result" style="font-size:9px;margin-top:6px;color:var(--t3)"></div>
 </div></div>
 
+${adminModelsCard()}
 <div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">AI MODEL USAGE</span><span style="font-size:9px;color:var(--t4);font-weight:400">Last 50 queries</span></div><div class="card-body"><button class="btn btn-ghost btn-sm" style="font-size:9px;margin-bottom:8px" onclick="renderModelLog()">Refresh</button><div id="model-log-rows" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"><div style="color:var(--t4);font-size:10px">No queries yet this session.</div></div></div></div><div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">📊 GOOGLE SHEETS SYNC</span></div><div class="card-body">
 <div class="fg"><label>Apps Script Web App URL</label>
 <input type="text" id="sheets-url" value="${esc(sheetsUrl)}" placeholder="https://script.google.com/macros/s/.../exec" oninput="saveSheetUrl()"/>
