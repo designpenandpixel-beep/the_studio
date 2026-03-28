@@ -7966,7 +7966,14 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // ══════════════════════════════════════
 // API — FAL.AI
 // ══════════════════════════════════════
-function falFetch(url,init){const method=(init?.method||'GET');const authorization=init?.headers?.['Authorization']||undefined;const body=init?.body?JSON.parse(init.body):undefined;return fetch('/api/fal',{method:'POST',headers:_authHeaders(),body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})});}
+function falFetch(url,init){
+  // Call fal.ai directly from browser — fal.ai supports CORS natively
+  const method=(init?.method||'GET');
+  const authorization=init?.headers?.['Authorization']||('Key '+kF());
+  const opts={method,headers:{'Authorization':authorization,'Content-Type':'application/json'}};
+  if(method!=='GET'&&init?.body)opts.body=init.body;
+  return fetch(url,opts);
+}
 async function falImg(prompt){
   aiStart();
   const k=kF(); // may be empty — server proxy has FAL_KEY env var as fallback
