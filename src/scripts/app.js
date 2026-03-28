@@ -659,6 +659,12 @@ const S={
   rules:{},vidModel:null,
   stopSb:false,stopVid:false,
   bType:null,bStep:0,bAnswers:{},
+  // Generation history — loaded from localStorage
+  sgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_sg_history')||'[]');}catch(e){return [];}})(),
+  vqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_vqg_history')||'[]');}catch(e){return [];}})(),
+  sqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_sqg_history')||'[]');}catch(e){return [];}})(),
+  mqgResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_mqg_history')||'[]');}catch(e){return [];}})(),
+  tdResults: (()=>{try{return JSON.parse(localStorage.getItem('sv2_td_history')||'[]');}catch(e){return [];}})(),
 };
 
 // ══════════════════════════════════════
@@ -3630,9 +3636,12 @@ ${mode!=='img2img'?`<div class="fg"><label>Model</label><select id="sg-model" on
 </div>
 <!-- Results panel -->
 <div>
-<div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px">Generated</div>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+<div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em">Generated ${(S.sgResults&&S.sgResults.length)?'<span style="color:#FF6B35;font-weight:600;text-transform:none">'+S.sgResults.length+'</span>':''}</div>
+${(S.sgResults&&S.sgResults.length)?`<button onclick="S.sgResults=[];_tryLS(()=>localStorage.removeItem('sv2_sg_history'));render()" style="font-size:9px;color:#3a3a55;background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px" onmouseenter="this.style.color='#EF4444'" onmouseleave="this.style.color='#3a3a55'">Clear all</button>`:''}
+</div>
 <div style="display:flex;flex-direction:column;gap:10px">
-${(S.sgResults||[]).map(r=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;overflow:hidden;transition:border-color 0.15s" onmouseenter="this.style.borderColor='rgba(255,107,53,0.3)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)'">
+${(S.sgResults||[]).map(r=>`<div draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${r.id}');this.style.opacity='0.5'" ondragend="this.style.opacity='1'" ondragover="event.preventDefault();this.style.borderColor='#FF6B35'" ondragleave="this.style.borderColor='rgba(255,255,255,0.06)'" ondrop="event.preventDefault();reorderSgResult('${r.id}',event.dataTransfer.getData('text/plain'));this.style.borderColor='rgba(255,255,255,0.06)'" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;overflow:hidden;transition:border-color 0.15s,opacity 0.15s;cursor:grab" onmouseenter="this.style.borderColor='rgba(255,107,53,0.3)'" onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)'">
 <img src="${r.url}" onclick="openImgModal('Generated','${r.url}','${r.prompt||''}'.substring(0,120))" style="width:100%;display:block;border-radius:8px 8px 0 0;cursor:zoom-in" onerror="this.style.display='none'" title="Click to view full size">
 <div style="padding:8px 10px;display:flex;gap:6px">
 <div style="font-size:8px;color:#3a3a55;padding:4px 10px 0">${r.model||''} · ${r.ts?new Date(r.ts).toLocaleTimeString():''}</div>
@@ -3655,15 +3664,15 @@ function loadStyleRef(input){const file=input.files[0];if(!file)return;const rea
 // VIDEO GENERATION PAGE — Auto / Cinema Mode
 // ════════════════════════════════════════════════════════════
 const QG_VID_MODELS=[
-  {id:'fal-ai/kling-video/v2.1/master/text-to-video',n:'Kling 2.1 Master',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Premium cinematic T2V'},
-  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master (I2V)',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Image to cinematic video'},
-  {id:'fal-ai/minimax/video-01-live',n:'Minimax Hailuo',mode:['t2v','i2v'],dur:[6],ratio:['16:9','9:16','1:1'],desc:'Fast, high quality'},
-  {id:'fal-ai/runway-gen4/turbo/image-to-video',n:'Runway Gen-4 Turbo',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16'],desc:'Hollywood-grade I2V'},
-  {id:'fal-ai/wan-2.1/text-to-video',n:'Wan 2.1 T2V',mode:['t2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source powerhouse'},
-  {id:'fal-ai/wan-2.1/image-to-video',n:'Wan 2.1 I2V',mode:['i2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source I2V'},
-  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',mode:['t2v','i2v'],dur:[5,9],ratio:['16:9','9:16','1:1'],desc:'Fast, creative motion'},
-  {id:'fal-ai/veo3',n:'Google Veo 3',mode:['t2v'],dur:[8],ratio:['16:9'],desc:'State-of-art T2V with audio'},
-  {id:'fal-ai/cogvideox-5b',n:'CogVideoX 5B',mode:['t2v'],dur:[6],ratio:['16:9'],desc:'Open source quality'},
+  {id:'fal-ai/kling-video/v2.1/master/text-to-video',n:'Kling 2.1 Master',mode:['t2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Premium cinematic T2V',cost:'~₹10 credits/5s'},
+  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling 2.1 Master (I2V)',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16','1:1'],desc:'Image to cinematic video',cost:'~₹10 credits/5s'},
+  {id:'fal-ai/minimax/video-01-live',n:'Minimax Hailuo',mode:['t2v','i2v'],dur:[6],ratio:['16:9','9:16','1:1'],desc:'Fast, high quality',cost:'~$0.49/gen'},
+  {id:'fal-ai/runway-gen4/turbo/image-to-video',n:'Runway Gen-4 Turbo',mode:['i2v'],dur:[5,10],ratio:['16:9','9:16'],desc:'Hollywood-grade I2V',cost:'~$0.05/s'},
+  {id:'fal-ai/wan-2.1/text-to-video',n:'Wan 2.1 T2V',mode:['t2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source powerhouse',cost:'~$0.20/5s'},
+  {id:'fal-ai/wan-2.1/image-to-video',n:'Wan 2.1 I2V',mode:['i2v'],dur:[5],ratio:['16:9','9:16','1:1'],desc:'Open source I2V',cost:'~$0.20/5s'},
+  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',mode:['t2v','i2v'],dur:[5,9],ratio:['16:9','9:16','1:1'],desc:'Fast, creative motion',cost:'~$0.30/5s'},
+  {id:'fal-ai/veo3',n:'Google Veo 3',mode:['t2v'],dur:[8],ratio:['16:9'],desc:'State-of-art + native audio',cost:'~$0.75/gen'},
+  {id:'fal-ai/cogvideox-5b',n:'CogVideoX 5B',mode:['t2v'],dur:[6],ratio:['16:9'],desc:'Open source quality',cost:'~$0.10/gen'},
 ];
 
 const CIN={
@@ -3760,13 +3769,13 @@ ${cinMode?`<div style="background:linear-gradient(135deg,rgba(139,92,246,0.06),r
   <!-- Row 1: Lens + Shot type + Angle -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
     <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Lens</label>${sel('cin-lens',CIN.lens)}</div>
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Shot Type</label>${sel('cin-shot',CIN.shot)}</div>
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Angle</label>${sel('cin-angle',CIN.angle)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Framing — Wide for context, CU for emotion, ECU for extreme detail, OTS for dialogue">Shot Type &#9432;</label>${sel('cin-shot',CIN.shot)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Camera angle — Low Angle = power, High Angle = vulnerability, Dutch = tension">Angle &#9432;</label>${sel('cin-angle',CIN.angle)}</div>
   </div>
 
   <!-- Row 2: Camera movements (stack up to 3) -->
   <div style="margin-bottom:12px">
-    <label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Camera Movement <span style="color:#3a3a55;font-weight:400">— stack up to 3 moves</span></label>
+    <label title="Stack up to 3 moves simultaneously — Dolly In + Orbit + FPV creates complex compound camera paths" style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px;cursor:help">Camera Movement &#9432; <span style="color:#3a3a55;font-weight:400">— stack up to 3 moves</span></label>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
       ${sel('cin-move1',CIN.move)}${sel('cin-move2',['—',...CIN.move])}${sel('cin-move3',['—',...CIN.move])}
     </div>
@@ -3774,15 +3783,15 @@ ${cinMode?`<div style="background:linear-gradient(135deg,rgba(139,92,246,0.06),r
 
   <!-- Row 3: DOF + Film style + Lighting -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Depth of Field</label>${sel('cin-dof',CIN.dof)}</div>
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Film Style</label>${sel('cin-style',CIN.style)}</div>
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Lighting Mood</label>${sel('cin-light',CIN.light)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Shallow = blurry background bokeh, Deep = everything sharp, Rack = focus shifts mid-shot">Depth of Field &#9432;</label>${sel('cin-dof',CIN.dof)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Visual aesthetic — Anamorphic = cinematic widescreen, VHS = retro grain, Film Noir = high contrast">Film Style &#9432;</label>${sel('cin-style',CIN.style)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Scene lighting — Golden Hour = warm, Blue Hour = cool/moody, Chiaroscuro = dramatic shadows">Lighting Mood &#9432;</label>${sel('cin-light',CIN.light)}</div>
   </div>
 
   <!-- Row 4: FPS + Time remapping -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Frame Rate Feel</label>${sel('cin-fps',CIN.fps)}</div>
-    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Time Remapping</label>${sel('cin-time',CIN.time)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="24fps = cinematic natural, 48fps = HFR crisp, 60fps = hyper-smooth sports/action">Frame Rate Feel &#9432;</label>${sel('cin-fps',CIN.fps)}</div>
+    <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px" title="Speed: 0.5x = slow-mo, 0.25x = ultra slow, 4x = hyperlapse, 10x = timelapse">Time Remapping &#9432;</label>${sel('cin-time',CIN.time)}</div>
   </div>
 
   <!-- Assembled cinematic prompt (live preview) -->
@@ -3809,7 +3818,7 @@ ${cinMode?`<div style="background:linear-gradient(135deg,rgba(139,92,246,0.06),r
       <select id="vid-model" onchange="S.vqgModel=this.value;render()" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
         ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
       </select>
-      <div style="font-size:8px;color:#3a3a55;margin-top:3px">${selModel.desc||''}</div>
+      <div style="display:flex;gap:6px;margin-top:3px;align-items:center"><span style="font-size:8px;color:#3a3a55">${selModel.desc||''}</span>${selModel.cost?`<span style="font-size:8px;color:#F59E0B;font-weight:600;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px">${selModel.cost}</span>`:''}</div>
     </div>
     <div><label style="font-size:9px;font-weight:700;color:#6B6B8A;letter-spacing:0.06em;text-transform:uppercase;display:block;margin-bottom:5px">Duration</label>
       <select id="vid-dur" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px">
@@ -3931,6 +3940,8 @@ async function runVideoGen(){
         if(!videoUrl)throw new Error('No video URL. Response: '+JSON.stringify(rd).substring(0,100));
         if(!S.vqgResults)S.vqgResults=[];
         S.vqgResults.unshift({id:gid('v'),url:videoUrl,prompt,cinPrompt:cinMode?prompt:null,model:modelId.split('/').pop(),dur,mode:vMode,ts:new Date().toISOString()});
+        if(S.vqgResults.length>20)S.vqgResults=S.vqgResults.slice(0,20);
+        _tryLS(()=>localStorage.setItem('sv2_vqg_history',JSON.stringify(S.vqgResults)));
         render();toast('Video ready!','ok');return;
       }
       if(ds.status==='FAILED')throw new Error('Generation failed: '+(ds.error||''));
@@ -3996,7 +4007,7 @@ sMode==='music'?`<div style="background:rgba(255,255,255,0.02);border:1px solid 
 </div>
 <div>
   <div style="font-size:10px;font-weight:700;color:#6B6B8A;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Generated</div>
-  ${results.map(a=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:4px">${esc(a.type||'Audio')}</div><div style="font-size:9px;color:#6B6B8A;margin-bottom:8px">${new Date(a.ts).toLocaleTimeString()}</div><audio controls src="${a.url}" style="width:100%;margin-bottom:8px"></audio><a href="${a.url}" download style="display:block;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a></div>`).join('')}
+  ${results.map(a=>`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#C8C8E0;margin-bottom:4px">${esc(a.type||'Audio')}</div><div style="font-size:9px;color:#6B6B8A;margin-bottom:8px">${new Date(a.ts).toLocaleTimeString()}</div><div style="position:relative;margin-bottom:8px"><canvas id="waveform_${a.id}" width="280" height="48" style="width:100%;height:48px;border-radius:6px;background:rgba(16,185,129,0.06);display:block;cursor:pointer" onclick="playAudioWithWaveform('${a.url}','${a.id}')"></canvas><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none" id="wplay_${a.id}"><div style="width:32px;height:32px;border-radius:50%;background:rgba(16,185,129,0.85);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">&#9654;</div></div></div><a href="${a.url}" download style="display:block;text-align:center;font-size:10px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);color:#6B6B8A;text-decoration:none">&#8595; Download</a></div>`).join('')}
   ${!results.length?`<div style="border:1px dashed rgba(255,255,255,0.06);border-radius:10px;padding:28px;text-align:center;color:#3a3a55"><div style="font-size:28px;opacity:0.3;margin-bottom:8px">&#127925;</div><div style="font-size:11px;margin-bottom:4px">Generated audio appears here</div><div style="font-size:9px;color:#3a3a55">Supports: MP3, WAV download</div></div>`:''}
 </div>
 </div></div>`;
@@ -4023,7 +4034,9 @@ async function runTTSGen(){
     const d=await r.json();if(!d.request_id)throw new Error('No request_id');
     const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
     const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
-    for(let i=0;i<60;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voiceover',ts:new Date().toISOString()});render();toast('Voiceover ready!','ok');return;}if(ds.status==='FAILED')throw new Error('TTS failed');}throw new Error('Timeout');
+    for(let i=0;i<60;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voiceover',ts:new Date().toISOString()});
+      if(S.sqgResults.length>30)S.sqgResults=S.sqgResults.slice(0,30);
+      _tryLS(()=>localStorage.setItem('sv2_sqg_history',JSON.stringify(S.sqgResults)));render();toast('Voiceover ready!','ok');return;}if(ds.status==='FAILED')throw new Error('TTS failed');}throw new Error('Timeout');
   }catch(e){toast('TTS failed: '+e.message,'err');}finally{aiEnd();if(btn){btn.textContent='\u{1F3A8} Generate Voiceover';btn.disabled=false;}}
 }
 
@@ -4037,7 +4050,9 @@ async function runSFXGen(){
     const d=await r.json();if(!d.request_id)throw new Error('No request_id');
     const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id+'/status';
     const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id;
-    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'SFX',ts:new Date().toISOString()});render();toast('SFX ready!','ok');return;}if(ds.status==='FAILED')throw new Error('SFX failed');}throw new Error('Timeout');
+    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'SFX',ts:new Date().toISOString()});
+      if(S.sqgResults.length>30)S.sqgResults=S.sqgResults.slice(0,30);
+      _tryLS(()=>localStorage.setItem('sv2_sqg_history',JSON.stringify(S.sqgResults)));render();toast('SFX ready!','ok');return;}if(ds.status==='FAILED')throw new Error('SFX failed');}throw new Error('Timeout');
   }catch(e){toast('SFX failed: '+e.message,'err');}finally{aiEnd();}
 }
 
@@ -4054,7 +4069,9 @@ async function runMusicGen(){
     const d=await r.json();if(!d.request_id)throw new Error('No request_id');
     const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id+'/status';
     const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id;
-    for(let i=0;i<80;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Music',ts:new Date().toISOString()});render();toast('Music ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Music failed');}throw new Error('Timeout');
+    for(let i=0;i<80;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.audio_url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Music',ts:new Date().toISOString()});
+      if(S.sqgResults.length>30)S.sqgResults=S.sqgResults.slice(0,30);
+      _tryLS(()=>localStorage.setItem('sv2_sqg_history',JSON.stringify(S.sqgResults)));render();toast('Music ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Music failed');}throw new Error('Timeout');
   }catch(e){toast('Music failed: '+e.message,'err');}finally{aiEnd();}
 }
 
@@ -4067,7 +4084,9 @@ async function runVoiceIsolate(){
     const d=await r.json();if(!d.request_id)throw new Error('No request_id');
     const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id+'/status';
     const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id;
-    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voice Isolated',ts:new Date().toISOString()});render();toast('Voice isolated!','ok');return;}if(ds.status==='FAILED')throw new Error('Isolation failed');}throw new Error('Timeout');
+    for(let i=0;i<40;i++){await sleep(2500);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.audio?.url||rd.url||'';if(!url)throw new Error('No audio URL');if(!S.sqgResults)S.sqgResults=[];S.sqgResults.unshift({id:gid('sq'),url,type:'Voice Isolated',ts:new Date().toISOString()});
+      if(S.sqgResults.length>30)S.sqgResults=S.sqgResults.slice(0,30);
+      _tryLS(()=>localStorage.setItem('sv2_sqg_history',JSON.stringify(S.sqgResults)));render();toast('Voice isolated!','ok');return;}if(ds.status==='FAILED')throw new Error('Isolation failed');}throw new Error('Timeout');
   }catch(e){toast('Isolation failed: '+e.message,'err');}finally{aiEnd();}
 }
 
@@ -4123,7 +4142,9 @@ async function runMotionGen(){
     const d=await r.json();if(!d.request_id)throw new Error('No request_id');
     const statusUrl=d.status_url||'https://queue.fal.run/'+finalModel+'/requests/'+d.request_id+'/status';
     const responseUrl=d.response_url||'https://queue.fal.run/'+finalModel+'/requests/'+d.request_id;
-    for(let i=0;i<120;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.video?.url||rd.videos?.[0]?.url||rd.url||'';if(!url)throw new Error('No video URL');if(!S.mqgResults)S.mqgResults=[];S.mqgResults.unshift({id:gid('mq'),url,ts:new Date().toISOString()});render();toast('Motion ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Motion failed');}throw new Error('Timeout');
+    for(let i=0;i<120;i++){await sleep(3000);const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});const ds=await rs.json();if(ds.status==='COMPLETED'){const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});const rd=await rr.json();const url=rd.video?.url||rd.videos?.[0]?.url||rd.url||'';if(!url)throw new Error('No video URL');if(!S.mqgResults)S.mqgResults=[];S.mqgResults.unshift({id:gid('mq'),url,ts:new Date().toISOString()});
+      if(S.mqgResults.length>20)S.mqgResults=S.mqgResults.slice(0,20);
+      _tryLS(()=>localStorage.setItem('sv2_mqg_history',JSON.stringify(S.mqgResults)));render();toast('Motion ready!','ok');return;}if(ds.status==='FAILED')throw new Error('Motion failed');}throw new Error('Timeout');
   }catch(e){toast('Motion failed: '+e.message,'err');}finally{aiEnd();if(btn){btn.textContent='\u26A1 Generate Motion';btn.disabled=false;}}
 }
 
@@ -4190,6 +4211,8 @@ async function run3DGen(){
         const glb=rd.model_mesh?.url||rd.model?.url||rd.url||'';const fbx=rd.rigged_model_fbx?.url||'';const preview=rd.thumbnail_url||rd.rendered_image?.url||'';
         if(!glb)throw new Error('No GLB URL');if(!S.tdResults)S.tdResults=[];
         S.tdResults.unshift({id:gid('td'),glb,fbx,preview,name:prompt.substring(0,40)||'3D Model',ts:new Date().toISOString()});
+        if(S.tdResults.length>20)S.tdResults=S.tdResults.slice(0,20);
+        _tryLS(()=>localStorage.setItem('sv2_td_history',JSON.stringify(S.tdResults)));
         render();toast('3D model ready!','ok');return;}
       if(ds.status==='FAILED')throw new Error('3D failed: '+(ds.error||''));
     }
@@ -4247,6 +4270,8 @@ async function runSingleGen(count=1){
       S.imgModel=model;S.imgAspect=ratio;S.imgTone=style;S.imgQuality='hd';
       const url=await falImg(improvedPrompt);
       S.sgResults.unshift({id:gid('sg'),url,prompt:improvedPrompt,model,ts:new Date().toISOString()});
+      if(S.sgResults.length>50)S.sgResults=S.sgResults.slice(0,50);
+      _tryLS(()=>localStorage.setItem('sv2_sg_history',JSON.stringify(S.sgResults.map(r=>({...r,url:r.url.startsWith('data:')?'':r.url})).filter(r=>r.url))));
       render();
       toast('Image ready!','ok');
     }catch(e){toast('Generation failed: '+e.message,'err');}
@@ -5121,6 +5146,65 @@ async function leadsAddNote(type,idx){
 }
 
 function saveSheetUrl(){const u=DB.getUser(S.session?.userId);if(!u)return;u.sheetsUrl=document.getElementById('sheets-url')?.value.trim()||'';DB.saveUser(u);}
+// Audio playback with canvas waveform
+const _audioPlayers={};
+function playAudioWithWaveform(url,id){
+  // Stop any existing
+  if(_audioPlayers[id]){
+    _audioPlayers[id].pause();
+    delete _audioPlayers[id];
+    const btn=document.getElementById('wplay_'+id);
+    if(btn)btn.innerHTML='<div style="width:32px;height:32px;border-radius:50%;background:rgba(16,185,129,0.8);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff">&#9654;</div>';
+    return;
+  }
+  const audio=new Audio(url);
+  _audioPlayers[id]=audio;
+  const canvas=document.getElementById('waveform_'+id);
+  const btn=document.getElementById('wplay_'+id);
+  if(btn)btn.innerHTML='<div style="width:32px;height:32px;border-radius:50%;background:rgba(239,68,68,0.8);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff">&#9646;&#9646;</div>';
+  // Draw animated waveform bars
+  if(canvas){
+    const ctx=canvas.getContext('2d');
+    const W=canvas.width,H=canvas.height;
+    const bars=40;
+    let frame=0;
+    const animate=()=>{
+      if(!_audioPlayers[id])return;
+      ctx.clearRect(0,0,W,H);
+      for(let i=0;i<bars;i++){
+        const x=i*(W/bars);const bw=(W/bars)-2;
+        const h=8+Math.sin((frame*0.1)+i*0.5)*12+Math.random()*8;
+        ctx.fillStyle='rgba(16,185,129,'+(0.4+Math.sin((frame*0.08)+i*0.3)*0.3)+')';
+        ctx.fillRect(x,H/2-h/2,bw,h);
+      }
+      frame++;
+      requestAnimationFrame(animate);
+    };
+    animate();
+  }
+  audio.play().catch(()=>{});
+  audio.onended=()=>{
+    delete _audioPlayers[id];
+    if(btn)btn.innerHTML='<div style="width:32px;height:32px;border-radius:50%;background:rgba(16,185,129,0.8);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff">&#9654;</div>';
+    if(canvas){
+      const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='rgba(16,185,129,0.15)';
+      ctx.fillRect(0,canvas.height/2-2,canvas.width,4);
+    }
+  };
+}
+
+function reorderSgResult(targetId, draggedId){
+  if(!S.sgResults||targetId===draggedId)return;
+  const dragIdx=S.sgResults.findIndex(r=>r.id===draggedId);
+  const targetIdx=S.sgResults.findIndex(r=>r.id===targetId);
+  if(dragIdx<0||targetIdx<0)return;
+  const [dragged]=S.sgResults.splice(dragIdx,1);
+  S.sgResults.splice(targetIdx,0,dragged);
+  _tryLS(()=>localStorage.setItem('sv2_sg_history',JSON.stringify(S.sgResults)));
+  render();
+}
+
 function renderModelLog(){
   var el=document.getElementById('model-log-rows');if(!el)return;
   var log=window._modelLog||[];
