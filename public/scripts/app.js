@@ -4245,6 +4245,7 @@ ${location.protocol==='file:'?`<div style="background:#100800;border:1px solid #
 </div>
 <div style="margin-bottom:8px"><button onclick="['k-c','k-f','k-e'].forEach(id=>{const i=document.getElementById(id);if(i)i.type=i.type==='password'?'text':'password'});this.textContent=document.getElementById('k-c')?.type==='password'?'👁 Show keys':'👁‍🗨 Hide keys'" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--t4)">👁 Show keys</button></div>
 <button class="btn btn-green" onclick="saveKeys();toast('Keys saved!','ok')">✓ Save API Keys</button>
+<div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-outline btn-sm" style="font-size:9px" onclick="testFalKey()">Test fal.ai</button><button class="btn btn-outline btn-sm" style="font-size:9px" onclick="testClaudeKey()">Test Claude</button></div><div id="api-test-result" style="font-size:9px;margin-top:6px;color:var(--t3)"></div>
 </div></div>
 
 <div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">AI MODEL USAGE</span><span style="font-size:9px;color:var(--t4);font-weight:400">Last 50 queries</span></div><div class="card-body"><button class="btn btn-ghost btn-sm" style="font-size:9px;margin-bottom:8px" onclick="renderModelLog()">Refresh</button><div id="model-log-rows" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"><div style="color:var(--t4);font-size:10px">No queries yet this session.</div></div></div></div><div class="card" style="margin-bottom:14px"><div class="card-head"><span class="card-title">📊 GOOGLE SHEETS SYNC</span></div><div class="card-body">
@@ -4524,6 +4525,37 @@ function renderModelLog(){
       +'<span style="font-size:8px;color:var(--t4);margin-left:auto">'+new Date(e.ts).toLocaleTimeString()+'</span>'
       +'</div>';
   }).join('');
+}
+async function testFalKey(){
+  var el=document.getElementById("api-test-result");
+  if(el)el.textContent="Testing fal.ai key...";
+  var k=kF();
+  if(!k){if(el)el.style.color="var(--red)",el.textContent="No fal.ai key saved in Settings";return;}
+  try{
+    var payload={url:"https://queue.fal.run/fal-ai/flux-pro/v1.1-ultra",method:"POST",body:{prompt:"test",aspect_ratio:"1:1"},authorization:"Key "+k};
+    var r=await fetch("/api/fal",{method:"POST",headers:_authHeaders(),body:JSON.stringify(payload)});
+    var txt=await r.text();
+    var msg;
+    try{
+      var d=JSON.parse(txt);
+      if(d.request_id)msg="fal.ai WORKING - queued: "+d.request_id.substring(0,12);
+      else if(d.error)msg="fal.ai error: "+d.error;
+      else msg=txt.substring(0,100);
+    }catch(pe){msg="raw: "+txt.substring(0,100);}
+    if(el){el.style.color=r.ok?"var(--green)":"var(--gold)";el.textContent="["+r.status+"] "+msg;}
+  }catch(e){
+    if(el){el.style.color="var(--red)";el.textContent="Network error: "+e.message;}
+  }
+}
+async function testClaudeKey(){
+  var el=document.getElementById("api-test-result");
+  if(el)el.textContent="Testing Claude key...";
+  try{
+    var r=await callClaude("You are a test.","Respond: OK",50);
+    if(el){el.style.color="var(--green)";el.textContent="Claude WORKING: "+r.substring(0,40);}
+  }catch(e){
+    if(el){el.style.color="var(--red)";el.textContent="Claude error: "+e.message;}
+  }
 }
 function saveGlobalPrompts(){
   const u=getAdminUser();if(!u)return;
@@ -7967,12 +7999,18 @@ async function callClaude(sys,user,max=3000,imgB64=null,imgType=null){
 // API — FAL.AI
 // ══════════════════════════════════════
 function falFetch(url,init){
-  // Call fal.ai directly from browser — fal.ai supports CORS natively
+  // Route through /api/fal server proxy (avoids CORS + protects API key)
   const method=(init?.method||'GET');
   const authorization=init?.headers?.['Authorization']||('Key '+kF());
-  const opts={method,headers:{'Authorization':authorization,'Content-Type':'application/json'}};
-  if(method!=='GET'&&init?.body)opts.body=init.body;
-  return fetch(url,opts);
+  const body=init?.body?JSON.parse(init.body):undefined;
+  return fetch('/api/fal',{
+    method:'POST',
+    headers:_authHeaders({'content-type':'application/json'}),
+    body:JSON.stringify({url,method,body,...(authorization?{authorization}:{})})
+  }).catch(function(e){
+    console.error('[fal] proxy error:',e.message,'url=',url);
+    throw e;
+  });
 }
 async function falImg(prompt){
   aiStart();
