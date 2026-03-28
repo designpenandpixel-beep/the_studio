@@ -4861,6 +4861,11 @@ function renderVoicePicker(){
   const fUse    = S.sqgVUse     || '';
   const fLang   = S.sqgVLang    || '';
   const fFav    = S.sqgVFav     || false;
+  const fBrand  = S.sqgVBrand   || false;
+  // Brand voices for current project's client
+  const _proj   = S.pid ? DB.getProject(S.pid) : null;
+  const _client = _proj ? DB.getUser(_proj.clientId) : null;
+  const brandVoices = _client?.brandVoices || [];
   const selId   = S.sqgVoiceId  || voices[0]?.id || '21m00Tcm4TlvDq8ikWAM';
 
   // Unique filter values from loaded voices
@@ -4885,10 +4890,11 @@ function renderVoicePicker(){
       && (!fAge    || v.age    === fAge)
       && (!fUse    || v.use    === fUse)
       && (!fLang   || v.lang   === fLang)
-      && (!fFav    || favs.includes(v.id));
+      && (!fFav    || favs.includes(v.id))
+      && (!fBrand  || brandVoices.includes(v.id));
   });
 
-  const activeCount = [fGender,fAccent,fAge,fUse,fLang].filter(Boolean).length + (fFav?1:0);
+  const activeCount = [fGender,fAccent,fAge,fUse,fLang].filter(Boolean).length + (fFav?1:0) + (fBrand?1:0);
 
   // Pill builder
   const pill=(label,active,onclick,extra='')=>`<button onclick="${onclick}"
@@ -4909,7 +4915,7 @@ function renderVoicePicker(){
           style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
           border-radius:7px;color:#C8C8E0;padding:6px 8px 6px 26px;font-size:10px;box-sizing:border-box"/>
       </div>
-      ${activeCount?`<button onclick="S.sqgVGender='';S.sqgVAccent='';S.sqgVAge='';S.sqgVUse='';S.sqgVLang='';S.sqgVFav=false;render()"
+      ${activeCount?`<button onclick="S.sqgVGender='';S.sqgVAccent='';S.sqgVAge='';S.sqgVUse='';S.sqgVLang='';S.sqgVFav=false;S.sqgVBrand=false;render()"
         style="white-space:nowrap;font-size:9px;padding:5px 9px;border-radius:6px;cursor:pointer;
         background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#EF4444">
         ✕ Clear (${activeCount})
@@ -4926,6 +4932,30 @@ function renderVoicePicker(){
       padding:10px 12px;background:rgba(255,255,255,0.02);
       border:1px solid rgba(255,255,255,0.06);border-radius:8px">
 
+      <!-- 🏢 Brand Voices — shows when in project context -->
+      ${(()=>{
+        const proj=S.pid?DB.getProject(S.pid):null;
+        const client=proj?DB.getUser(proj.clientId):null;
+        const bv=client?.brandVoices||[];
+        if(!client)return'';
+        const fBrand=S.sqgVBrand||false;
+        return`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+          padding:8px 12px;background:rgba(245,158,11,0.06);
+          border:1px solid rgba(245,158,11,0.2);border-radius:8px;margin-bottom:4px">
+          <div style="font-size:9px;color:#F59E0B;font-weight:700;margin-right:4px">
+            🏢 ${esc(client.name)}
+          </div>
+          <button onclick="S.sqgVBrand=!S.sqgVBrand;render()"
+            style="padding:3px 12px;border-radius:12px;font-size:9px;font-weight:700;cursor:pointer;
+            border:1px solid ${fBrand?'rgba(245,158,11,0.5)':'rgba(245,158,11,0.25)'};
+            background:${fBrand?'rgba(245,158,11,0.2)':'rgba(245,158,11,0.06)'};
+            color:#F59E0B">
+            ${fBrand?'★':'☆'} Brand Voices ${bv.length?'('+bv.length+')':''}
+          </button>
+          ${!bv.length?'<span style="font-size:9px;color:#3a3a55;font-style:italic">None set — admin can add in Client settings</span>':''}
+          ${fBrand&&bv.length?bv.slice(0,3).map(id=>{const v=voices.find(x=>x.id===id)||EL_VOICES.find(x=>x.id===id);return v?`<span style="font-size:8px;color:#F59E0B66">${esc(v.n)}</span>`:''}).join(', '):''}
+        </div>`;
+      })()}
       <!-- ★ Favourites row — most prominent -->
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span style="font-size:9px;color:#3a3a55;font-weight:700;text-transform:uppercase;
@@ -8044,6 +8074,141 @@ function doRegister(role){
   pushToRole('admin','account',`New ${ic?'client':'creator'} registered`,`${name} (${ic?u.clientId:username}) has been added`,null);
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// CLIENT BRAND VOICE MANAGEMENT
+// ══════════════════════════════════════════════════════════════════
+
+function showBrandVoiceModal(clientId){
+  const client = DB.getUser(clientId); if(!client) return;
+  const brandVoices = client.brandVoices || [];
+  const allVoices = S.elVoices || EL_VOICES;
+
+  // Mini filter state inside this modal
+  const mSearch  = S._bvSearch  || '';
+  const mGender  = S._bvGender  || '';
+  const mAccent  = S._bvAccent  || '';
+
+  const accents = [...new Set(allVoices.map(v=>v.accent||'').filter(Boolean))].sort();
+
+  const filtered = allVoices.filter(v=>{
+    const q = mSearch.toLowerCase();
+    return (!q || v.n.toLowerCase().includes(q) || (v.accent||'').toLowerCase().includes(q) || (v.desc||'').toLowerCase().includes(q))
+      && (!mGender || v.gender===mGender)
+      && (!mAccent || v.accent===mAccent);
+  });
+
+  openModal(`<div class="modal-title">🎙 Brand Voices — ${esc(client.name)}</div>
+<div style="font-size:10px;color:#6B6B8A;margin-bottom:14px">
+  Tag voices that match this client's brand personality. Creators will see these highlighted when working on ${esc(client.name)}'s projects.
+</div>
+
+${brandVoices.length?`<div style="margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:#F59E0B;margin-bottom:8px">★ Brand Voices (${brandVoices.length})</div>
+  <div style="display:flex;flex-wrap:wrap;gap:5px">
+    ${brandVoices.map(id=>{
+      const v=allVoices.find(x=>x.id===id)||{n:id,id};
+      return`<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+        border-radius:10px;background:rgba(245,158,11,0.12);
+        border:1px solid rgba(245,158,11,0.3);font-size:10px;color:#F59E0B">
+        ${esc(v.n)}
+        <button onclick="toggleBrandVoice('${clientId}','${id}')"
+          style="background:none;border:none;cursor:pointer;color:#F59E0B;font-size:11px;padding:0;line-height:1">×</button>
+      </span>`;
+    }).join('')}
+  </div>
+</div>`:''}
+
+<!-- Search + filters -->
+<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+  <input type="text" id="bv-search" value="${esc(mSearch)}"
+    placeholder="Search voices..." oninput="S._bvSearch=this.value;showBrandVoiceModal('${clientId}')"
+    style="flex:1;min-width:120px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
+    border-radius:6px;color:#C8C8E0;padding:5px 8px;font-size:10px"/>
+  <select onchange="S._bvGender=this.value;showBrandVoiceModal('${clientId}')"
+    style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
+    border-radius:6px;color:#C8C8E0;padding:5px 8px;font-size:10px">
+    <option value="">All Genders</option>
+    <option value="F"${mGender==='F'?' selected':''}>Female</option>
+    <option value="M"${mGender==='M'?' selected':''}>Male</option>
+  </select>
+  <select onchange="S._bvAccent=this.value;showBrandVoiceModal('${clientId}')"
+    style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
+    border-radius:6px;color:#C8C8E0;padding:5px 8px;font-size:10px">
+    <option value="">All Accents</option>
+    ${accents.map(a=>`<option value="${a}"${mAccent===a?' selected':''}>${a}</option>`).join('')}
+  </select>
+</div>
+
+<!-- Voice list with toggle buttons -->
+<div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;
+  border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:4px">
+  ${filtered.slice(0,60).map(v=>{
+    const isBrand = brandVoices.includes(v.id);
+    const tags = [v.gender==='F'?'Female':v.gender==='M'?'Male':'', v.accent, v.age, v.use].filter(Boolean).join(' · ');
+    return`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;
+      border:1px solid ${isBrand?'rgba(245,158,11,0.3)':'transparent'};
+      background:${isBrand?'rgba(245,158,11,0.06)':'rgba(255,255,255,0.01)'}">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:${isBrand?'700':'400'};
+          color:${isBrand?'#F59E0B':'#C8C8E0'}">${esc(v.n)}</div>
+        ${tags?`<div style="font-size:9px;color:#6B6B8A">${tags}${v.desc?' — '+v.desc.substring(0,30):''}</div>`:''}
+      </div>
+      <button onclick="toggleBrandVoice('${clientId}','${v.id}')"
+        style="padding:4px 12px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;
+        white-space:nowrap;transition:all 0.12s;
+        border:1px solid ${isBrand?'rgba(245,158,11,0.4)':'rgba(255,255,255,0.1)'};
+        background:${isBrand?'rgba(245,158,11,0.15)':'rgba(255,255,255,0.03)'};
+        color:${isBrand?'#F59E0B':'#6B6B8A'}">
+        ${isBrand?'★ Brand':'+ Tag'}
+      </button>
+    </div>`;
+  }).join('')}
+  ${filtered.length>60?`<div style="padding:8px;text-align:center;font-size:9px;color:#3a3a55">
+    ${filtered.length-60} more — search to narrow
+  </div>`:''}
+</div>
+
+<div class="btn-row" style="margin-top:14px">
+  <button class="btn btn-gold" onclick="closeModal();S._bvSearch='';S._bvGender='';S._bvAccent=''">
+    Done
+  </button>
+  ${brandVoices.length?`<button class="btn btn-ghost" onclick="clearBrandVoices('${clientId}')">
+    Clear All
+  </button>`:''}
+</div>`);
+}
+
+function toggleBrandVoice(clientId, voiceId){
+  const client = DB.getUser(clientId); if(!client) return;
+  if(!client.brandVoices) client.brandVoices = [];
+  const idx = client.brandVoices.indexOf(voiceId);
+  if(idx >= 0){
+    client.brandVoices.splice(idx, 1);
+    toast('Removed from brand voices','ok');
+  } else {
+    client.brandVoices.push(voiceId);
+    const v = (S.elVoices||EL_VOICES).find(x=>x.id===voiceId);
+    toast(`★ ${v?.n||'Voice'} tagged as brand voice for ${client.name}`,'ok');
+  }
+  DB.saveUser(client);
+  // Re-open the modal to reflect change
+  showBrandVoiceModal(clientId);
+}
+
+function clearBrandVoices(clientId){
+  if(!confirm('Remove all brand voices for this client?')) return;
+  const client = DB.getUser(clientId); if(!client) return;
+  client.brandVoices = [];
+  DB.saveUser(client);
+  showBrandVoiceModal(clientId);
+  toast('Brand voices cleared','ok');
+}
+
+// ── Show brand voice pill on admin client cards ───────────────────
+// (inject into adminClients card rendering)
+// ══ END BRAND VOICES ═════════════════════════════════════════════
+
 function showEditUserModal(uid){
   const u=DB.getUser(uid);if(!u)return;
   const pms=DB.getPMs();
@@ -8060,6 +8225,18 @@ ${u.role==='client'?`
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
   <div style="font-size:10px;color:var(--t4)">Client ID:</div>
   <code style="color:var(--purple);font-size:11px">${u.clientId}</code>
+</div>
+<div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:14px;margin-bottom:12px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <div>
+      <div style="font-size:11px;font-weight:700;color:#F59E0B">🎙 Brand Voices</div>
+      <div style="font-size:9px;color:#6B6B8A;margin-top:2px">Voices pre-approved for this client's content</div>
+    </div>
+    <button onclick="showBrandVoiceModal('${uid}')"       style="font-size:9px;padding:4px 10px;border-radius:6px;cursor:pointer;      background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);color:#F59E0B">
+      ✎ Manage Voices
+    </button>
+  </div>
+  ${(()=>{ const bv=u.brandVoices||[]; if(!bv.length) return '<div style="font-size:9px;color:#3a3a55">No brand voices set yet — click Manage Voices to add</div>'; const allV=EL_VOICES; return bv.slice(0,6).map(id=>{ const v=allV.find(x=>x.id===id); return v?`<span style="font-size:9px;padding:2px 8px;border-radius:8px;background:rgba(245,158,11,0.1);color:#F59E0B;border:1px solid rgba(245,158,11,0.2);margin-right:4px;margin-bottom:4px;display:inline-block">${esc(v.n)}</span>`:''; }).join('')+( bv.length>6?`<span style="font-size:9px;color:#6B6B8A">+${bv.length-6} more</span>`:''  );  })()}
 </div>`:''}
 <div class="btn-row"><button class="btn btn-gold" onclick="doEditUser('${uid}')">Save</button><button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
 }
