@@ -3530,11 +3530,14 @@ function singleImageGen(){
   const selI2IModel=S.i2iModel||i2iModels[0]?.id||'fal-ai/flux-pro/kontext';
   const tab=(k,lbl,ico)=>`<button onclick="S.qgMode='${k}';render()" style="padding:7px 16px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${mode===k?'var(--gold)':'var(--b2)'};background:${mode===k?'rgba(196,157,58,0.15)':'transparent'};color:${mode===k?'var(--gold)':'var(--t3)'};">${ico} ${lbl}</button>`;
   if(mode==='video')return videoGenPage();
+  if(mode==='sound')return soundGenPage();
+  if(mode==='motion')return motionGenPage();
+  if(mode==='threed')return threeDGenPage();
   return`<div style="padding:20px 24px;max-width:820px;margin:0 auto">
     <div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
       <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">✦ Quick Generate</div>
       <div style="font-size:11px;color:var(--t4);margin-top:3px">Create images instantly — text, image-to-image, or style reference</div></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('txt2img','Text → Image','📝')}${tab('img2img','Image → Image','🖼')}${tab('styleref','Style Reference','🎨')}${tab('video','Video','&#127916;')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${tab('txt2img','Text → Image','📝')}${tab('img2img','Image → Image','🖼')}${tab('styleref','Style Reference','🎨')}${tab('video','Video','&#127916;')}${tab('sound','Sound','&#127925;')}${tab('motion','Motion','&#9889;')}${tab('threed','3D','&#11096;')}</div>
     </div>
     <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:22px;margin-bottom:16px">
       <div class="fg" style="margin-bottom:14px">
@@ -3895,6 +3898,594 @@ async function runVideoGen(){
   finally{aiEnd();if(btn){btn.textContent='\u25ba Generate Video';btn.disabled=false;}if(status)status.style.display='none';}
 }
 // ── END VIDEO GEN ─────────────────────────────────────────────────────────
+
+
+// ── SOUND GENERATION PAGE ─────────────────────────────────────────────────
+const QG_TTS_MODELS = [
+  {id:'fal-ai/elevenlabs/tts/multilingual-v2',n:'ElevenLabs Multilingual v2',desc:'29 languages, ultra-natural, best quality',feature:'voice_id'},
+  {id:'fal-ai/elevenlabs/tts/turbo-v2.5',n:'ElevenLabs Turbo v2.5',desc:'Fastest, 32 languages, low-latency',feature:'voice_id'},
+  {id:'fal-ai/minimax/speech-02-hd',n:'MiniMax Speech-02 HD',desc:'300+ voices, 30+ languages, emotional control',feature:'voice_id'},
+  {id:'fal-ai/kokoro',n:'Kokoro TTS',desc:'Fast, cost-efficient, American English',feature:'voice'},
+  {id:'fal-ai/f5-tts',n:'F5-TTS (Voice Clone)',desc:'Clone any voice from a reference audio file',feature:'voice_clone'},
+  {id:'fal-ai/resemble-ai/chatterbox',n:'Chatterbox',desc:'Expressive, personality-driven, memes & games',feature:'voice_clone'},
+];
+const EL_VOICES = [
+  {id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel — Calm, narrative'},
+  {id:'9BWtsMINqrJLrRacOk9x',n:'Aria — Warm, conversational'},
+  {id:'EXAVITQu4vr4xnSDxMaL',n:'Sarah — Soft, expressive'},
+  {id:'TxGEqnHWrfWFTfGW9XjX',n:'Josh — Deep, authoritative'},
+  {id:'ErXwobaYiN019PkySvjV',n:'Antoni — Warm, friendly'},
+  {id:'pNInz6obpgDQGcFmaJgB',n:'Adam — Authoritative, M'},
+  {id:'2EiwWnXFnvU5JabPnv8n',n:'Clyde — War veteran, M'},
+  {id:'onwK4e9ZLuTAKqWW03F9',n:'Daniel — British, M'},
+];
+const MINIMAX_VOICES = ['male-qn-qingse','male-qn-jingying','female-shaonv','female-yujie','female-chengshu','male-qn-badao','female-tianmei'];
+
+function soundGenPage(){
+  const sMode=S.sqgMode||'tts';
+  const selModelId=S.sqgModel||QG_TTS_MODELS[0].id;
+  const selModel=QG_TTS_MODELS.find(m=>m.id===selModelId)||QG_TTS_MODELS[0];
+  const tab=(k,lbl,ico)=>`<button onclick="S.sqgMode='${k}';render()" style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${sMode===k?'#a78bfa':'var(--b2)'};background:${sMode===k?'rgba(139,92,246,0.12)':'transparent'};color:${sMode===k?'#a78bfa':'var(--t3)'};">${ico} ${lbl}</button>`;
+  const results=S.sqgResults||[];
+
+  return`<div style="padding:20px 24px;max-width:900px;margin:0 auto">
+<div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">&#127925; Sound Studio</div>
+  <div style="font-size:11px;color:var(--t4);margin-top:3px">Voiceover, voice cloning, SFX, background music</div></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    ${tab('tts','Voiceover','&#127908;')}${tab('sfx','SFX','&#9889;')}${tab('music','Music','&#127911;')}${tab('isolate','Voice Isolate','&#127908;')}
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
+<div>
+<!-- TTS -->
+${sMode==='tts'?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+  <div class="fg" style="margin-bottom:12px">
+    <label>Script / Text</label>
+    <textarea id="sq-text" rows="5" placeholder="Type your voiceover script here..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box">${S.sqgText||''}</textarea>
+    <div style="font-size:9px;color:var(--t4);margin-top:3px;display:flex;justify-content:space-between">
+      <span>~${Math.round((S.sqgText||'').length/5)} words</span>
+      <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:2px 8px" onclick="enhanceSoundScript()">&#10022; Enhance with AI</button>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+    <div class="fg">
+      <label>TTS Model</label>
+      <select id="sq-model" onchange="S.sqgModel=this.value;render()">
+        ${QG_TTS_MODELS.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
+      </select>
+      <div style="font-size:8px;color:var(--t4);margin-top:3px">${selModel.desc}</div>
+    </div>
+    <div class="fg">
+      <label>Voice</label>
+      ${selModel.feature==='voice_id'&&selModelId.includes('eleven')?`<select id="sq-voice">${EL_VOICES.map(v=>`<option value="${v.id}">${v.n}</option>`).join('')}</select>`:
+        selModel.feature==='voice_id'&&selModelId.includes('minimax')?`<select id="sq-voice">${MINIMAX_VOICES.map(v=>`<option value="${v}">${v}</option>`).join('')}</select>`:
+        selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah (F, US)</option><option value="am_adam">Adam (M, US)</option><option value="bf_emma">Emma (F, UK)</option><option value="bm_george">George (M, UK)</option></select>`:
+        `<div style="font-size:10px;color:var(--t4);padding:8px;background:var(--bg3);border-radius:6px">Uses reference audio below for voice cloning</div>`}
+    </div>
+  </div>
+  ${selModel.feature==='voice_clone'?`<div style="margin-bottom:12px">
+    <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">REFERENCE AUDIO (for voice cloning)</label>
+    <div onclick="document.getElementById('sq-ref-audio').click()" style="border:2px dashed var(--b2);border-radius:8px;padding:14px;text-align:center;cursor:pointer">
+      ${S.sqgRefAudioName?`<div style="font-size:11px;color:var(--t1)">&#127925; ${S.sqgRefAudioName}</div><div style="font-size:9px;color:var(--t4)">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload 10+ second audio sample</div>`}
+    </div>
+    <input type="file" id="sq-ref-audio" accept="audio/*" style="display:none" onchange="loadSqRefAudio(this)">
+  </div>`:''}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Speed</label><select id="sq-speed"><option value="0.75">0.75x — Slow</option><option value="1.0" selected>1.0x — Normal</option><option value="1.25">1.25x — Fast</option><option value="1.5">1.5x — Very Fast</option></select></div>
+    <div class="fg"><label>Emotion / Style</label><select id="sq-emotion"><option value="">Neutral</option><option value="excited">Excited</option><option value="sad">Sad</option><option value="angry">Angry</option><option value="cheerful">Cheerful</option><option value="whispering">Whispering</option></select></div>
+  </div>
+  <button class="btn btn-gold" style="width:100%;justify-content:center" id="sq-gen-btn" onclick="runTTSGen()">&#127908; Generate Voiceover</button>
+</div>`:
+sMode==='sfx'?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+  <div class="fg" style="margin-bottom:14px">
+    <label>Sound Effect Description</label>
+    <textarea id="sq-sfx-prompt" rows="3" placeholder="e.g. A thunderstorm with heavy rain and distant lightning, outdoor ambience..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Duration (seconds)</label><select id="sq-sfx-dur"><option value="1">1s</option><option value="2">2s</option><option value="5" selected>5s</option><option value="10">10s</option><option value="22">22s</option></select></div>
+    <div class="fg"><label>Category</label><select id="sq-sfx-cat"><option>Nature</option><option>Urban/City</option><option>Sci-fi</option><option>Fantasy/Magic</option><option>Weapons</option><option>Vehicles</option><option>Animals</option><option>UI/Interface</option><option>Horror</option><option>Cinematic</option></select></div>
+  </div>
+  <button class="btn btn-gold" style="width:100%;justify-content:center" onclick="runSFXGen()">&#9889; Generate SFX</button>
+</div>`:
+sMode==='music'?`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+  <div class="fg" style="margin-bottom:12px">
+    <label>Music Description</label>
+    <textarea id="sq-music-prompt" rows="3" placeholder="e.g. Uplifting cinematic orchestral score with brass and strings, epic emotional build-up, 120 BPM..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+    <div class="fg"><label>Genre</label><select id="sq-music-genre"><option>Cinematic</option><option>Electronic</option><option>Hip-Hop</option><option>Ambient</option><option>Rock</option><option>Jazz</option><option>Classical</option><option>Pop</option><option>World</option><option>Indie</option></select></div>
+    <div class="fg"><label>Mood</label><select id="sq-music-mood"><option>Uplifting</option><option>Dramatic</option><option>Melancholic</option><option>Tense</option><option>Peaceful</option><option>Energetic</option><option>Mysterious</option></select></div>
+    <div class="fg"><label>Duration</label><select id="sq-music-dur"><option value="15">15s</option><option value="30" selected>30s</option><option value="60">60s</option><option value="120">2min</option></select></div>
+  </div>
+  <button class="btn btn-gold" style="width:100%;justify-content:center" onclick="runMusicGen()">&#127911; Generate Music</button>
+</div>`:
+`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+  <div style="margin-bottom:14px">
+    <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">AUDIO TO ISOLATE</label>
+    <div onclick="document.getElementById('sq-isolate-file').click()" style="border:2px dashed var(--b2);border-radius:10px;padding:22px;text-align:center;cursor:pointer">
+      ${S.sqgIsolateName?`<div style="font-size:11px;color:var(--t1)">&#127925; ${S.sqgIsolateName}</div><div style="font-size:9px;color:var(--t4)">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload audio with voice + background noise</div>`}
+    </div>
+    <input type="file" id="sq-isolate-file" accept="audio/*" style="display:none" onchange="loadSqIsolateFile(this)">
+  </div>
+  <div style="background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.2);border-radius:8px;padding:10px;font-size:10px;color:#a78bfa;margin-bottom:14px">AI removes background noise, music and non-voice sounds — powered by ElevenLabs.</div>
+  <button class="btn btn-gold" style="width:100%;justify-content:center" onclick="runVoiceIsolate()">&#127908; Isolate Voice</button>
+</div>`}
+</div>
+<!-- Results -->
+<div>
+  <div style="font-size:10px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Generated Audio</div>
+  ${results.length?results.map(a=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:8px">
+    <div style="font-size:10px;font-weight:700;color:var(--t1);margin-bottom:4px">${esc(a.type||'Audio')} &middot; ${a.model||''}</div>
+    <div style="font-size:9px;color:var(--t4);margin-bottom:8px">${new Date(a.ts).toLocaleTimeString()}</div>
+    <audio controls src="${a.url}" style="width:100%;margin-bottom:8px"></audio>
+    <a href="${a.url}" download class="btn btn-ghost btn-sm" style="width:100%;text-align:center;font-size:9px">&darr; Download</a>
+  </div>`).join(''):`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:10px;padding:32px;text-align:center;color:var(--t4);font-size:11px"><div style="font-size:32px;margin-bottom:10px">&#127925;</div>Generated audio appears here</div>`}
+</div>
+</div>
+</div>`;
+}
+
+function loadSqRefAudio(input){const f=input.files[0];if(!f)return;S.sqgRefAudioName=f.name;const r=new FileReader();r.onload=e=>{S.sqgRefAudioData=e.target.result;render();};r.readAsDataURL(f);}
+function loadSqIsolateFile(input){const f=input.files[0];if(!f)return;S.sqgIsolateName=f.name;const r=new FileReader();r.onload=e=>{S.sqgIsolateData=e.target.result;render();};r.readAsDataURL(f);}
+
+async function enhanceSoundScript(){
+  const el=document.getElementById('sq-text');const cur=el?.value?.trim();
+  if(!cur)return toast('Enter a script first','err');
+  try{const r=await callClaude('You are a professional voiceover scriptwriter. Enhance the script for natural spoken delivery: add pauses [pause], emphasis [strong], and improve flow. Return ONLY the enhanced script.','Script: "'+cur+'"',400);if(el&&r)el.value=r.trim();S.sqgText=r.trim();toast('Script enhanced','ok');}
+  catch(e){toast('Enhancement failed','err');}
+}
+
+async function runTTSGen(){
+  const text=document.getElementById('sq-text')?.value?.trim();
+  if(!text)return toast('Enter a script','err');
+  const modelId=document.getElementById('sq-model')?.value||QG_TTS_MODELS[0].id;
+  const voice=document.getElementById('sq-voice')?.value||'21m00Tcm4TlvDq8ikWAM';
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  const btn=document.getElementById('sq-gen-btn');if(btn){btn.textContent='Generating...';btn.disabled=true;}
+  S.sqgText=text;
+  aiStart();
+  try{
+    let body={};
+    if(modelId.includes('eleven'))body={text,voice_id:voice};
+    else if(modelId.includes('minimax'))body={text,voice_id:voice,model:'speech-02-hd'};
+    else if(modelId.includes('kokoro'))body={text,voice:voice||'af_sarah'};
+    else if(modelId.includes('f5-tts'))body={gen_text:text,ref_audio_url:S.sqgRefAudioData||'https://storage.googleapis.com/falserverless/example_inputs/reference_audio.wav',model_type:'F5-TTS'};
+    else if(modelId.includes('chatterbox'))body={text,exaggeration:0.5};
+
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+    for(let i=0;i<60;i++){
+      await sleep(2500);
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const url=rd.audio?.url||rd.audio_url||rd.url||rd.audio_file?.url||'';
+        if(!url)throw new Error('No audio URL in response');
+        if(!S.sqgResults)S.sqgResults=[];
+        S.sqgResults.unshift({id:gid('sq'),url,type:'Voiceover',model:modelId.split('/').pop(),ts:new Date().toISOString()});
+        render();toast('Voiceover ready!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('TTS generation failed');
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('TTS failed: '+e.message,'err');}
+  finally{aiEnd();if(btn){btn.textContent='\u{1F3A8} Generate Voiceover';btn.disabled=false;}}
+}
+
+async function runSFXGen(){
+  const prompt=document.getElementById('sq-sfx-prompt')?.value?.trim();
+  if(!prompt)return toast('Describe the sound effect','err');
+  const dur=parseInt(document.getElementById('sq-sfx-dur')?.value||'5');
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  aiStart();
+  try{
+    const body={text:prompt,duration_seconds:dur};
+    const r=await falFetch('https://queue.fal.run/fal-ai/elevenlabs/sound-effects',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/sound-effects/requests/'+d.request_id;
+    for(let i=0;i<40;i++){
+      await sleep(2500);
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const url=rd.audio?.url||rd.audio_url||rd.url||'';
+        if(!url)throw new Error('No audio URL');
+        if(!S.sqgResults)S.sqgResults=[];
+        S.sqgResults.unshift({id:gid('sq'),url,type:'SFX',model:'ElevenLabs SFX',ts:new Date().toISOString()});
+        render();toast('SFX ready!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('SFX generation failed');
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('SFX failed: '+e.message,'err');}
+  finally{aiEnd();}
+}
+
+async function runMusicGen(){
+  const genre=document.getElementById('sq-music-genre')?.value||'Cinematic';
+  const mood=document.getElementById('sq-music-mood')?.value||'Uplifting';
+  const dur=parseInt(document.getElementById('sq-music-dur')?.value||'30');
+  const desc=document.getElementById('sq-music-prompt')?.value?.trim();
+  const prompt=(desc||'')+'. Genre: '+genre+'. Mood: '+mood+'.';
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  aiStart();
+  try{
+    const body={prompt,duration:dur,instrumental:true};
+    const r=await falFetch('https://queue.fal.run/fal-ai/ace-step',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/ace-step/requests/'+d.request_id;
+    for(let i=0;i<80;i++){
+      await sleep(3000);
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const url=rd.audio?.url||rd.audio_url||rd.url||rd.audio?.[0]?.url||'';
+        if(!url)throw new Error('No audio URL');
+        if(!S.sqgResults)S.sqgResults=[];
+        S.sqgResults.unshift({id:gid('sq'),url,type:'Music',model:'ACE-Step',ts:new Date().toISOString()});
+        render();toast('Music ready!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('Music generation failed');
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('Music failed: '+e.message,'err');}
+  finally{aiEnd();}
+}
+
+async function runVoiceIsolate(){
+  if(!S.sqgIsolateData)return toast('Upload an audio file first','err');
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  aiStart();
+  try{
+    const body={audio_url:S.sqgIsolateData};
+    const r=await falFetch('https://queue.fal.run/fal-ai/elevenlabs/audio-isolation',{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/fal-ai/elevenlabs/audio-isolation/requests/'+d.request_id;
+    for(let i=0;i<40;i++){
+      await sleep(2500);
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const url=rd.audio?.url||rd.audio_url||rd.url||'';
+        if(!url)throw new Error('No audio URL');
+        if(!S.sqgResults)S.sqgResults=[];
+        S.sqgResults.unshift({id:gid('sq'),url,type:'Voice Isolated',model:'ElevenLabs',ts:new Date().toISOString()});
+        render();toast('Voice isolated!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('Isolation failed');
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('Voice isolation failed: '+e.message,'err');}
+  finally{aiEnd();}
+}
+// ── END SOUND GEN ─────────────────────────────────────────────────────────
+
+// ── MOTION GRAPHICS PAGE ──────────────────────────────────────────────────
+const QG_MOTION_MODELS = [
+  {id:'fal-ai/pixverse/v4.5/effects',n:'PixVerse Effects',desc:'Apply cinematic visual effects to video/image',type:'effect'},
+  {id:'fal-ai/pixverse/v4.5/transitions',n:'PixVerse Transitions',desc:'Animate between two images with style',type:'transition'},
+  {id:'fal-ai/kling-video/v2.1/master/image-to-video',n:'Kling Motion Animate',desc:'Animate still image with motion control',type:'i2v'},
+  {id:'fal-ai/hunyuan-video/framepack',n:'HunyuanVideo FramePack',desc:'Long-form video with motion continuity',type:'i2v'},
+  {id:'fal-ai/luma-dream-machine/ray-2-flash',n:'Luma Ray 2 Flash',desc:'Fast, creative motion from image or text',type:'both'},
+  {id:'fal-ai/pixverse/v4.5/text-to-video',n:'PixVerse T2V',desc:'Text-driven motion graphics generation',type:'t2v'},
+];
+const PIXVERSE_EFFECTS = ['zoom_in','zoom_out','rotate','shake','glitch','cinematic','slow_motion','explosion','lightning','fire'];
+
+function motionGenPage(){
+  const mMode=S.mqgMode||'effect';
+  const selModelId=S.mqgModel||QG_MOTION_MODELS[0].id;
+  const selModel=QG_MOTION_MODELS.find(m=>m.id===selModelId)||QG_MOTION_MODELS[0];
+  const tab=(k,lbl,ico)=>`<button onclick="S.mqgMode='${k}';S.mqgModel=null;render()" style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${mMode===k?'#F59E0B':'var(--b2)'};background:${mMode===k?'rgba(245,158,11,0.12)':'transparent'};color:${mMode===k?'#F59E0B':'var(--t3)'};">${ico} ${lbl}</button>`;
+  const availModels=QG_MOTION_MODELS.filter(m=>mMode==='effect'?m.type==='effect':mMode==='transition'?m.type==='transition':mMode==='animate'?['i2v','both'].includes(m.type):['t2v','both'].includes(m.type));
+  const results=S.mqgResults||[];
+
+  return`<div style="padding:20px 24px;max-width:900px;margin:0 auto">
+<div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">&#9889; Motion Graphics</div>
+  <div style="font-size:11px;color:var(--t4);margin-top:3px">Effects, transitions, animation, motion from images</div></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">${tab('effect','Effects','&#10024;')}${tab('transition','Transitions','&#8614;')}${tab('animate','Animate Image','&#127916;')}${tab('t2v','Text Motion','&#128196;')}</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
+<div>
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg">
+        <label>Model</label>
+        <select id="mq-model" onchange="S.mqgModel=this.value;render()">
+          ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
+        </select>
+        <div style="font-size:8px;color:var(--t4);margin-top:3px">${selModel.desc}</div>
+      </div>
+      ${mMode==='effect'?`<div class="fg"><label>Effect Type</label><select id="mq-effect">${PIXVERSE_EFFECTS.map(e=>`<option value="${e}">${e.replace(/_/g,' ')}</option>`).join('')}</select></div>`:
+        `<div class="fg"><label>Duration</label><select id="mq-dur"><option value="3">3s</option><option value="5" selected>5s</option><option value="8">8s</option><option value="10">10s</option></select></div>`}
+    </div>
+
+    <!-- Prompt for T2V / motion description -->
+    <div class="fg" style="margin-bottom:14px">
+      <label>${mMode==='t2v'?'Motion / Prompt':'Motion Description (optional)'}</label>
+      <textarea id="mq-prompt" rows="2" placeholder="${mMode==='effect'?'Optional: describe how you want the effect applied...':mMode==='t2v'?'Describe the motion graphic you want to create...':'Describe the motion, camera movement, or animation...'}" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px;border-radius:8px;font-size:11px;resize:none;box-sizing:border-box"></textarea>
+    </div>
+
+    <!-- Source image(s) -->
+    ${mMode!=='t2v'?`<div style="margin-bottom:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">${mMode==='transition'?'IMAGE 1 (Start Frame)':'SOURCE IMAGE'}</label>
+      <div onclick="document.getElementById('mq-img1').click()" style="border:2px dashed var(--b2);border-radius:8px;padding:${S.mqgImg1?'8px':'18px'};text-align:center;cursor:pointer">
+        ${S.mqgImg1?`<img src="${S.mqgImg1}" style="max-height:100px;border-radius:4px"><div style="font-size:9px;color:var(--t4);margin-top:4px">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload source image</div>`}
+      </div>
+      <input type="file" id="mq-img1" accept="image/*" style="display:none" onchange="loadMqImg1(this)">
+      ${S.sgResults&&S.sgResults.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">${S.sgResults.slice(0,4).map(r=>`<img src="${r.url}" onclick="S.mqgImg1='${r.url}';render()" style="width:44px;height:44px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid ${S.mqgImg1===r.url?'#F59E0B':'var(--b2)'}">`).join('')}</div>`:''}
+    </div>
+    ${mMode==='transition'?`<div style="margin-bottom:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">IMAGE 2 (End Frame)</label>
+      <div onclick="document.getElementById('mq-img2').click()" style="border:2px dashed var(--b2);border-radius:8px;padding:${S.mqgImg2?'8px':'18px'};text-align:center;cursor:pointer">
+        ${S.mqgImg2?`<img src="${S.mqgImg2}" style="max-height:100px;border-radius:4px"><div style="font-size:9px;color:var(--t4);margin-top:4px">Click to change</div>`:`<div style="font-size:9px;color:var(--t4)">Upload end frame image</div>`}
+      </div>
+      <input type="file" id="mq-img2" accept="image/*" style="display:none" onchange="loadMqImg2(this)">
+    </div>`:''}`:
+    `<div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:10px;font-size:10px;color:#F59E0B;margin-bottom:14px">Describe the motion graphic scene — titles, logos, particles, transitions, reveals...</div>`}
+
+    <button class="btn btn-gold" style="width:100%;justify-content:center" id="mq-gen-btn" onclick="runMotionGen()">&#9889; Generate Motion</button>
+    <div id="mq-status" style="font-size:9px;color:var(--t4);text-align:center;margin-top:6px;display:none">Generating... 20-90 seconds</div>
+  </div>
+</div>
+<!-- Results -->
+<div>
+  <div style="font-size:10px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Generated Motion</div>
+  ${results.length?results.map(v=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;overflow:hidden;margin-bottom:10px">
+    <video src="${v.url}" controls style="width:100%;display:block"></video>
+    <div style="padding:8px 10px;display:flex;gap:6px">
+      <a href="${v.url}" download class="btn btn-ghost btn-sm" style="flex:1;text-align:center;font-size:9px">&darr; Download</a>
+    </div>
+  </div>`).join(''):`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:10px;padding:32px;text-align:center;color:var(--t4);font-size:11px"><div style="font-size:32px;margin-bottom:10px">&#9889;</div>Generated motion appears here</div>`}
+</div>
+</div>
+</div>`;
+}
+
+function loadMqImg1(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.mqgImg1=e.target.result;render();};r.readAsDataURL(f);}
+function loadMqImg2(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{S.mqgImg2=e.target.result;render();};r.readAsDataURL(f);}
+
+async function runMotionGen(){
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  const modelId=document.getElementById('mq-model')?.value||QG_MOTION_MODELS[0].id;
+  const prompt=document.getElementById('mq-prompt')?.value?.trim()||'Dynamic motion';
+  const dur=parseInt(document.getElementById('mq-dur')?.value||'5');
+  const effect=document.getElementById('mq-effect')?.value||'zoom_in';
+  const mMode=S.mqgMode||'effect';
+  const btn=document.getElementById('mq-gen-btn');
+  const status=document.getElementById('mq-status');
+  if(btn){btn.textContent='Generating...';btn.disabled=true;}
+  if(status)status.style.display='block';
+  aiStart();
+  try{
+    let body={};
+    if(mMode==='effect')body={image_url:S.mqgImg1||'',effect_type:effect,prompt};
+    else if(mMode==='transition')body={start_image_url:S.mqgImg1||'',end_image_url:S.mqgImg2||'',prompt,duration:dur};
+    else if(mMode==='animate')body={image_url:S.mqgImg1||'',prompt,duration:dur,aspect_ratio:'16:9'};
+    else body={prompt,duration:dur,aspect_ratio:'16:9'};
+
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,100));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+    for(let i=0;i<120;i++){
+      await sleep(3000);
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const url=rd.video?.url||rd.videos?.[0]?.url||rd.url||'';
+        if(!url)throw new Error('No video URL');
+        if(!S.mqgResults)S.mqgResults=[];
+        S.mqgResults.unshift({id:gid('mq'),url,ts:new Date().toISOString()});
+        render();toast('Motion ready!','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('Motion generation failed');
+    }
+    throw new Error('Timeout');
+  }catch(e){toast('Motion failed: '+e.message,'err');}
+  finally{aiEnd();if(btn){btn.textContent='\u26A1 Generate Motion';btn.disabled=false;}if(status)status.style.display='none';}
+}
+// ── END MOTION GRAPHICS ───────────────────────────────────────────────────
+
+// ── 3D GENERATION PAGE ────────────────────────────────────────────────────
+const QG_3D_MODELS = [
+  {id:'fal-ai/meshy/v6/text-to-3d',n:'Meshy v6 (Text)',mode:'t2t',desc:'Best text-to-3D, PBR textures, rigging optional'},
+  {id:'fal-ai/meshy/v6-preview/text-to-3d',n:'Meshy v6 Preview (Text)',mode:'t2t',desc:'Latest preview model, faster iteration'},
+  {id:'tripo3d/tripo/v2.5/image-to-3d',n:'Tripo3D v2.5 (Image)',mode:'i2t',desc:'Best image-to-3D, clean topology, PBR'},
+  {id:'fal-ai/meshy/v5/image-to-3d',n:'Meshy v5 (Image)',mode:'i2t',desc:'Image to 3D with texture generation'},
+  {id:'fal-ai/meshy/v5/multi-image-to-3d',n:'Meshy v5 Multi-Image',mode:'multi',desc:'Up to 4 images for higher fidelity 3D'},
+  {id:'fal-ai/meshy/v5/retexture',n:'Meshy Retexture',mode:'retex',desc:'Apply new textures to existing GLB model'},
+];
+
+function threeDGenPage(){
+  const tMode=S.tdMode||'t2t';
+  const selModelId=S.tdModel||QG_3D_MODELS[0].id;
+  const selModel=QG_3D_MODELS.find(m=>m.id===selModelId)||QG_3D_MODELS[0];
+  const tab=(k,lbl,ico)=>`<button onclick="S.tdMode='${k}';S.tdModel=null;render()" style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid ${tMode===k?'#06B6D4':'var(--b2)'};background:${tMode===k?'rgba(6,182,212,0.12)':'transparent'};color:${tMode===k?'#06B6D4':'var(--t3)'};">${ico} ${lbl}</button>`;
+  const availModels=QG_3D_MODELS.filter(m=>m.mode===tMode);
+  const results=S.tdResults||[];
+
+  return`<div style="padding:20px 24px;max-width:1000px;margin:0 auto">
+<div style="margin-bottom:18px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <div><div style="font-size:18px;font-weight:800;color:var(--t1);font-family:var(--font-h)">&#11096; 3D Generator</div>
+  <div style="font-size:11px;color:var(--t4);margin-top:3px">Text to 3D, image to 3D, multi-view, retexture — GLB/FBX download</div></div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap">
+    ${tab('t2t','Text \u2192 3D','&#128196;')}${tab('i2t','Image \u2192 3D','&#128247;')}${tab('multi','Multi-Image','&#128195;')}${tab('retex','Retexture','&#127912;')}
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 420px;gap:16px;align-items:start">
+<div>
+  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:14px;padding:20px">
+    <div class="fg" style="margin-bottom:14px">
+      <label>Model</label>
+      <select id="td-model" onchange="S.tdModel=this.value;render()">
+        ${availModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}
+      </select>
+      <div style="font-size:8px;color:var(--t4);margin-top:3px">${selModel.desc}</div>
+    </div>
+
+    ${tMode==='t2t'?`<div class="fg" style="margin-bottom:14px">
+      <label>Describe the 3D object</label>
+      <textarea id="td-prompt" rows="3" placeholder="e.g. A medieval iron knight helmet with visor, battle-worn, detailed engravings, metallic surface..." style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:10px;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg"><label>Style</label><select id="td-style"><option value="realistic">Realistic</option><option value="sculpture">Sculpture</option><option value="cartoon">Cartoon</option><option value="pbr">PBR</option></select></div>
+      <div class="fg"><label>Topology</label><select id="td-topo"><option value="triangle">Triangle</option><option value="quad">Quad</option></select></div>
+      <div class="fg"><label>Format</label><select id="td-fmt"><option value="glb">GLB (web/AR)</option><option value="fbx">FBX (game)</option><option value="obj">OBJ (general)</option></select></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--t3);cursor:pointer"><input type="checkbox" id="td-pbr" checked><span>PBR Maps (metallic/roughness/normal)</span></label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--t3);cursor:pointer"><input type="checkbox" id="td-rig"><span>Auto-rig humanoid</span></label>
+    </div>`:
+
+    tMode==='i2t'||tMode==='multi'?`<div style="margin-bottom:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">${tMode==='multi'?'REFERENCE IMAGES (up to 4, different angles)':'SOURCE IMAGE'}</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        ${(S.tdImages||[]).map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--b2)"><button onclick="S.tdImages=S.tdImages.filter((_,j)=>j!==${i});render()" style="position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;background:var(--red);color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1">x</button></div>`).join('')}
+        ${(!S.tdImages||S.tdImages.length<(tMode==='multi'?4:1))?`<div onclick="document.getElementById('td-img-upload').click()" style="width:80px;height:80px;border:2px dashed var(--b2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:22px;color:var(--t4)">+</div>`:''}
+      </div>
+      <input type="file" id="td-img-upload" accept="image/*" multiple style="display:none" onchange="loadTdImages(this)">
+      ${S.sgResults&&S.sgResults.length?`<div style="font-size:9px;color:var(--t4);margin-bottom:4px">Or use from Quick Generate:</div><div style="display:flex;gap:5px;flex-wrap:wrap">${S.sgResults.slice(0,4).map(r=>`<img src="${r.url}" onclick="if(!S.tdImages)S.tdImages=[];if(S.tdImages.length<4&&!S.tdImages.includes('${r.url}'))S.tdImages.push('${r.url}');render()" style="width:44px;height:44px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid var(--b2)">`).join('')}</div>`:''}
+      ${tMode==='i2t'?`<div class="fg" style="margin-top:10px"><label>Optional: describe the object</label><input type="text" id="td-prompt" placeholder="e.g. a ceramic vase, smooth finish..." style="width:100%;box-sizing:border-box"></div>`:''}
+    </div>`:
+    `<div style="margin-bottom:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.06em;display:block;margin-bottom:6px">GLB MODEL URL</label>
+      <input type="text" id="td-glb-url" placeholder="https://...model.glb" value="${S.tdGlbUrl||''}" style="width:100%;background:var(--bg3);border:1px solid var(--b2);color:var(--t1);padding:8px;border-radius:6px;font-size:11px;box-sizing:border-box">
+      <div class="fg" style="margin-top:10px"><label>Texture style prompt</label><input type="text" id="td-prompt" placeholder="e.g. worn medieval iron, rusty metallic..." style="width:100%;box-sizing:border-box"></div>
+    </div>`}
+
+    <button class="btn btn-gold" style="width:100%;justify-content:center" id="td-gen-btn" onclick="run3DGen()">&#11096; Generate 3D Model</button>
+    <div id="td-status" style="font-size:9px;color:var(--t4);text-align:center;margin-top:6px;display:none">Generating 3D... 1-5 minutes depending on model</div>
+  </div>
+</div>
+<!-- Results + Viewer -->
+<div>
+  <div style="font-size:10px;font-weight:700;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">3D Results</div>
+  ${results.length?results.map(m3=>`<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px;margin-bottom:10px">
+    <div style="font-size:10px;font-weight:700;color:var(--t1);margin-bottom:4px">${esc(m3.name||'3D Model')}</div>
+    <div style="font-size:9px;color:var(--t4);margin-bottom:8px">${m3.model||''} &middot; ${new Date(m3.ts).toLocaleTimeString()}</div>
+    ${m3.preview?`<img src="${m3.preview}" style="width:100%;border-radius:6px;margin-bottom:8px">`:
+    `<div style="width:100%;height:180px;background:var(--bg3);border-radius:6px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px"><div style="font-size:32px">&#11096;</div><div style="font-size:9px;color:var(--t4)">3D model ready</div></div>`}
+    <div style="display:flex;gap:6px">
+      <a href="${m3.glb}" download class="btn btn-ghost btn-sm" style="flex:1;text-align:center;font-size:9px">&darr; GLB</a>
+      ${m3.fbx?`<a href="${m3.fbx}" download class="btn btn-ghost btn-sm" style="font-size:9px">FBX</a>`:''}
+      <button class="btn btn-ghost btn-sm" style="font-size:9px" onclick="view3DModel('${m3.glb}')">&#128065; View 3D</button>
+    </div>
+  </div>`).join(''):`<div style="background:var(--bg2);border:1px dashed var(--b2);border-radius:10px;padding:32px;text-align:center;color:var(--t4);font-size:11px"><div style="font-size:32px;margin-bottom:10px">&#11096;</div>Generated 3D models appear here<br><span style="font-size:9px">Output: GLB, FBX, OBJ — download and open in Blender, Unity, etc.</span></div>`}
+  <div id="td-viewer" style="display:none;background:var(--bg2);border:1px solid var(--b1);border-radius:10px;overflow:hidden;margin-top:10px">
+    <div style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--b1)">
+      <span style="font-size:10px;font-weight:700;color:var(--t2)">3D Preview</span>
+      <button onclick="document.getElementById('td-viewer').style.display='none'" style="background:none;border:none;color:var(--t4);cursor:pointer;font-size:14px">x</button>
+    </div>
+    <div id="td-canvas-wrap" style="height:300px;background:#0a0a0a"></div>
+  </div>
+</div>
+</div>
+</div>`;
+}
+
+function loadTdImages(input){
+  if(!S.tdImages)S.tdImages=[];
+  Array.from(input.files).slice(0,4-S.tdImages.length).forEach(file=>{
+    const r=new FileReader();r.onload=e=>{if(S.tdImages.length<4){S.tdImages.push(e.target.result);render();}};r.readAsDataURL(file);
+  });
+}
+
+function view3DModel(glbUrl){
+  const viewer=document.getElementById('td-viewer');
+  const wrap=document.getElementById('td-canvas-wrap');
+  if(!viewer||!wrap)return;
+  viewer.style.display='block';
+  wrap.innerHTML='<div style="width:100%;height:300px;display:flex;align-items:center;justify-content:center;color:var(--t4);font-size:11px">Loading 3D viewer...<br><span style="font-size:9px;margin-top:4px">Tip: open the GLB in <a href="https://sandbox.babylonjs.com/" target="_blank" style="color:var(--blue)">Babylon.js Sandbox</a> for full 3D interaction</span></div>';
+  // Embed via model-viewer web component
+  const script=document.createElement('script');script.type='module';script.src='https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js';
+  if(!document.querySelector('script[src*="model-viewer"]'))document.head.appendChild(script);
+  setTimeout(()=>{
+    wrap.innerHTML=`<model-viewer src="${glbUrl}" auto-rotate camera-controls style="width:100%;height:300px;background:#0a0a0a" shadow-intensity="1"></model-viewer>`;
+  },500);
+}
+
+async function run3DGen(){
+  const k=kF();if(!k)return toast('Enter fal.ai key in Settings','err');
+  const modelId=document.getElementById('td-model')?.value||QG_3D_MODELS[0].id;
+  const prompt=document.getElementById('td-prompt')?.value?.trim()||'';
+  const tMode=S.tdMode||'t2t';
+  const btn=document.getElementById('td-gen-btn');
+  const status=document.getElementById('td-status');
+  if(btn){btn.textContent='Generating...';btn.disabled=true;}
+  if(status)status.style.display='block';
+  aiStart();
+  try{
+    let body={};
+    const pbr=document.getElementById('td-pbr')?.checked!==false;
+    const rig=document.getElementById('td-rig')?.checked||false;
+    const topo=document.getElementById('td-topo')?.value||'triangle';
+
+    if(tMode==='t2t'){
+      if(!prompt)throw new Error('Enter a prompt to describe the 3D object');
+      body={prompt,enable_pbr:pbr,topology:topo,should_remesh:true,enable_rigging:rig};
+    } else if(tMode==='i2t'){
+      const imgs=S.tdImages||[];if(!imgs.length)throw new Error('Upload at least one image');
+      body={image_url:imgs[0],should_texture:true,enable_pbr:pbr};
+    } else if(tMode==='multi'){
+      const imgs=S.tdImages||[];if(!imgs.length)throw new Error('Upload at least one image');
+      body={image_urls:imgs,should_texture:true,enable_pbr:pbr};
+    } else {
+      const glbUrl=document.getElementById('td-glb-url')?.value?.trim();
+      if(!glbUrl)throw new Error('Enter a GLB model URL');
+      body={model_url:glbUrl,prompt};
+    }
+
+    const r=await falFetch('https://queue.fal.run/'+modelId,{method:'POST',headers:{'Authorization':'Key '+k,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();throw new Error('fal '+r.status+': '+t.substring(0,120));}
+    const d=await r.json();if(!d.request_id)throw new Error('No request_id — model may be unavailable');
+    const statusUrl=d.status_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id+'/status';
+    const responseUrl=d.response_url||'https://queue.fal.run/'+modelId+'/requests/'+d.request_id;
+
+    for(let i=0;i<200;i++){
+      await sleep(4000);
+      if(status)status.textContent='Generating 3D... '+Math.round(i*4/60)+'min '+((i*4)%60)+'s elapsed';
+      const rs=await falFetch(statusUrl,{headers:{'Authorization':'Key '+k}});
+      const ds=await rs.json();
+      if(ds.status==='COMPLETED'){
+        const rr=await falFetch(responseUrl,{headers:{'Authorization':'Key '+k}});
+        const rd=await rr.json();
+        const glb=rd.model_mesh?.url||rd.model?.url||rd.glb?.url||rd.url||'';
+        const fbx=rd.rigged_model_fbx?.url||rd.fbx?.url||'';
+        const preview=rd.thumbnail_url||rd.rendered_image?.url||rd.preview?.url||'';
+        if(!glb)throw new Error('No GLB URL in response');
+        if(!S.tdResults)S.tdResults=[];
+        S.tdResults.unshift({id:gid('td'),glb,fbx,preview,name:prompt.substring(0,40)||'3D Model',model:modelId.split('/').pop(),ts:new Date().toISOString()});
+        render();toast('3D model ready! Download GLB.','ok');return;
+      }
+      if(ds.status==='FAILED')throw new Error('3D generation failed: '+(ds.error||''));
+    }
+    throw new Error('Timeout — try a simpler model or different prompt');
+  }catch(e){toast('3D failed: '+e.message,'err');console.error('[3d]',e);}
+  finally{aiEnd();if(btn){btn.textContent='\u2BC8 Generate 3D Model';btn.disabled=false;}if(status)status.style.display='none';}
+}
+// ── END 3D GEN ────────────────────────────────────────────────────────────
 
 function loadI2IImage(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.i2iPreview=e.target.result;S.i2iImageData=e.target.result;render();};reader.readAsDataURL(file);}
 function loadStyleRef(input){const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{S.styleRefPreview=e.target.result;S.styleRefData=e.target.result;render();};reader.readAsDataURL(file);}
