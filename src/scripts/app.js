@@ -7950,3 +7950,451 @@ async function urlToB64(url){try{const r=await fetch(url);const b=await r.blob()
   defaults.forEach(pm=>{_pms.push(pm);});
   _tryLS(()=>localStorage.setItem('sv2_pms',JSON.stringify(_pms)));
 })();
+// ============================================================
+// CinexAI V2 — AI PM Intelligence Stack
+// File: src/scripts/ai_pm_system.js
+// Copy to: public/scripts/ai_pm_system.js before every push
+//
+// Architecture note:
+// studio_projects and studio_users store all data inside
+// a single JSONB column called "data". Access as row.data.key
+// PM memory lives in separate pm_memory table (project_id TEXT)
+// Reference links live in project_reference_links (project_id TEXT)
+// ============================================================
+
+
+// ------------------------------------------------------------
+// SYSTEM PROMPT ASSEMBLY
+// Pulls all 3 layers fresh from Supabase on every chat open
+// projectId = the data->>'id' value (e.g. "pmn3pvtmhxjo")
+// clientId  = the data->>'id' value of the client user
+// ------------------------------------------------------------
+async function assembleAIPMSystemPrompt(projectId, clientId) {
+  try {
+
+    // --- LAYER 1: Platform DNA ---
+    const { data: configs } = await supabase
+      .from('platform_config')
+      .select('platform_identity, universal_prompt, negative_prompt, workflow_stages')
+      .limit(1);
+    const config = configs?.[0] || {};
+
+    // --- LAYER 2: Client identity ---
+    // studio_users stores everything inside data JSONB
+    const { data: users } = await supabase
+      .from('studio_users')
+      .select('data')
+      .limit(100); // fetch all, filter by clientId in JS
+
+    const clientRow = users?.find(u => u.data?.id === clientId);
+    const client = clientRow?.data || {};
+
+    // --- LAYER 3a: Project data ---
+    const { data: projects } = await supabase
+      .from('studio_projects')
+      .select('data')
+      .limit(100); // fetch all, filter by projectId in JS
+
+    const projectRow = projects?.find(p => p.data?.id === projectId);
+    const project = projectRow?.data || {};
+
+    // --- LAYER 3b: PM Memory ---
+    const { data: memRows } = await supabase
+      .from('pm_memory')
+      .select('*')
+      .eq('project_id', projectId)
+      .limit(1);
+    const mem = memRows?.[0] || {};
+
+    // --- LAYER 3c: Reference Links ---
+    const { data: refLinks } = await supabase
+      .from('project_reference_links')
+      .select('*')
+      .eq('project_id', projectId);
+
+    const links = refLinks || [];
+    const stages = config.workflow_stages || [];
+    const currentStageIndex = stages.findIndex(s =>
+      s.stage?.toLowerCase() === project.workflowStatus?.toLowerCase()
+    );
+    const nextStage = stages[currentStageIndex + 1] || null;
+
+    // --- ASSEMBLE ---
+    const systemPrompt = `
+${config.platform_identity || 'You are an AI Project Manager at CinexAI.'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LAYER 1 — PLATFORM RULES (NON-NEGOTIABLE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+UNIVERSAL INSTRUCTIONS:
+${config.universal_prompt || ''}
+
+RESTRICTIONS — NEVER DO:
+${config.negative_prompt || ''}
+
+CINEXAI WORKFLOW STAGES:
+${stages.map((s, i) => `${i + 1}. ${s.stage} — ${s.description}`).join('\n')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LAYER 2 — CLIENT IDENTITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CLIENT NAME: ${client.name || 'Unknown'}
+EMAIL: ${client.email || 'N/A'}
+ROLE: ${client.role || 'client'}
+
+${client.brandBook ? `BRAND BOOK: ${JSON.stringify(client.brandBook)}` : 'No Brand Book uploaded yet. If the client asks about brand-aligned work, gently invite them to complete their Brand Book.'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LAYER 3 — LIVE PROJECT MEMORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROJECT: ${project.name || 'Untitled Project'}
+STATUS: ${project.status || 'Unknown'}
+WORKFLOW STATUS: ${project.workflowStatus || 'Not set'}
+DEADLINE: ${project.deadline ? new Date(project.deadline).toDateString() : 'Not set'}
+
+PROJECT BRIEF:
+${project.brief || project.clientBrief || 'No brief uploaded yet.'}
+
+BRAND / BIBLE NOTES:
+${project.bible || 'No brand bible attached.'}
+
+WHAT HAPPENED LAST:
+${mem.last_summary || 'No summary yet — this may be the first session.'}
+
+CURRENT BLOCKERS:
+${Array.isArray(mem.current_blockers) && mem.current_blockers.length > 0
+  ? mem.current_blockers.map(b => `• ${b}`).join('\n')
+  : 'None reported.'}
+
+PENDING ACTIONS:
+${Array.isArray(mem.pending_actions) && mem.pending_actions.length > 0
+  ? mem.pending_actions.map(a => `• ${a}`).join('\n')
+  : 'None logged.'}
+
+KEY DECISIONS MADE:
+${Array.isArray(mem.key_decisions) && mem.key_decisions.length > 0
+  ? mem.key_decisions.map(d => `• ${d}`).join('\n')
+  : 'None recorded yet.'}
+
+WHAT THE CLIENT LAST ASKED:
+${mem.last_client_request || 'No previous request on record.'}
+
+PROJECT HEALTH: ${mem.mood || 'on-track'}
+${nextStage ? `NEXT STAGE: ${nextStage.stage} — ${nextStage.description}` : 'This project is in its final stage.'}
+
+${links.length > 0 ? `
+REFERENCE LINKS (shared by client):
+${links.map(l => `• ${l.label}: ${l.url}`).join('\n')}
+Reference these naturally in conversation when relevant.
+` : 'No reference links shared for this project yet.'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO RESPOND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are this client's dedicated Project Manager — not a chatbot.
+Respond like a senior professional who knows this project inside out — because you do.
+Be direct, warm, and specific. Use the project name. Use stage names. Use dates.
+If something is delayed, say so honestly. If something is going well, say that too.
+Match the client's energy — casual if they are casual, precise if they are formal.
+Never end with "Is there anything else I can help you with?" — always close with a clear next step.
+`.trim();
+
+    return systemPrompt;
+
+  } catch (err) {
+    console.error('[assembleAIPMSystemPrompt] Error:', err);
+    return `You are an AI Project Manager at CinexAI. A client is messaging you about project ID: ${projectId}. Respond professionally while you retrieve their project details.`;
+  }
+}
+
+
+// ------------------------------------------------------------
+// UPDATE PM MEMORY
+// Call after every significant chat exchange
+// ------------------------------------------------------------
+async function updatePMMemory(projectId, updates) {
+  try {
+    const { data: existing } = await supabase
+      .from('pm_memory')
+      .select('*')
+      .eq('project_id', projectId)
+      .limit(1);
+
+    const merged = {
+      ...(existing?.[0] || {}),
+      ...updates,
+      project_id: projectId,
+      updated_at: new Date().toISOString()
+    };
+
+    // Upsert — create if not exists, update if exists
+    const { error } = await supabase
+      .from('pm_memory')
+      .upsert(merged, { onConflict: 'project_id' });
+
+    if (error) throw error;
+
+  } catch (err) {
+    console.error('[updatePMMemory] Error:', err);
+  }
+}
+
+
+// ------------------------------------------------------------
+// SEND AI PM MESSAGE
+// Main function — call this on every chat send
+// ------------------------------------------------------------
+async function sendAIPMMessage(projectId, clientId, userMessage, chatHistory = []) {
+  try {
+    const systemPrompt = await assembleAIPMSystemPrompt(projectId, clientId);
+
+    const messages = [
+      ...chatHistory,
+      { role: 'user', content: userMessage }
+    ];
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages
+      })
+    });
+
+    const data = await response.json();
+    const reply = data.content?.[0]?.text || 'I hit a snag. Please try again.';
+
+    // Auto-update memory in background — fire and forget
+    updatePMMemoryFromExchange(projectId, userMessage, reply);
+
+    return reply;
+
+  } catch (err) {
+    console.error('[sendAIPMMessage] Error:', err);
+    return 'Something went wrong on my end. Please try again in a moment.';
+  }
+}
+
+
+// ------------------------------------------------------------
+// AUTO-UPDATE MEMORY FROM EXCHANGE
+// Runs silently after every message pair
+// Keeps Layer 3 always current
+// ------------------------------------------------------------
+async function updatePMMemoryFromExchange(projectId, userMessage, pmReply) {
+  try {
+    const extractionPrompt = `
+You just had this exchange as an AI Project Manager:
+
+CLIENT SAID: "${userMessage}"
+YOU REPLIED: "${pmReply}"
+
+Extract a JSON object with these fields (only include fields that are newly relevant):
+{
+  "last_summary": "One sentence summary of this exchange",
+  "last_client_request": "What the client asked or raised",
+  "current_blockers": ["any new blockers mentioned — empty array if none"],
+  "pending_actions": ["any new actions needed — empty array if none"],
+  "key_decisions": ["any decisions made — empty array if none"],
+  "mood": "on-track | at-risk | blocked | complete"
+}
+
+Respond ONLY with valid JSON. No preamble. No backticks.
+`.trim();
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: extractionPrompt }]
+      })
+    });
+
+    const data = await response.json();
+    const raw = data.content?.[0]?.text?.trim();
+    if (!raw) return;
+
+    const updates = JSON.parse(raw);
+    await updatePMMemory(projectId, updates);
+
+  } catch (err) {
+    // Silent fail — never block the chat
+    console.warn('[updatePMMemoryFromExchange] Background update failed:', err);
+  }
+}
+
+
+// ============================================================
+// REFERENCE LINKS — Project Creation Wizard Step
+// ============================================================
+
+window._refLinks = [];
+
+function initReferenceLinksStep() {
+  window._refLinks = [];
+  renderRefLinksList();
+}
+
+function addRefLink() {
+  const labelInput = document.getElementById('refLinkLabel');
+  const urlInput = document.getElementById('refLinkUrl');
+  const label = labelInput?.value?.trim();
+  const url = urlInput?.value?.trim();
+
+  if (!label || !url) {
+    showRefLinkError('Please enter both a label and a URL.');
+    return;
+  }
+  try { new URL(url); } catch {
+    showRefLinkError('Please enter a valid URL (include https://).');
+    return;
+  }
+
+  window._refLinks.push({ id: Date.now(), label, url });
+  labelInput.value = '';
+  urlInput.value = '';
+  clearRefLinkError();
+  renderRefLinksList();
+}
+
+function removeRefLink(id) {
+  window._refLinks = window._refLinks.filter(l => l.id !== id);
+  renderRefLinksList();
+}
+
+function renderRefLinksList() {
+  const container = document.getElementById('refLinksList');
+  if (!container) return;
+
+  if (window._refLinks.length === 0) {
+    container.innerHTML = `
+      <div class="ref-links-empty">
+        <span class="ref-links-empty-icon">🔗</span>
+        <p>No links yet. Drive folders, Notion docs, reference videos — anything the team needs.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = window._refLinks.map(link => `
+    <div class="ref-link-item">
+      <div class="ref-link-info">
+        <span class="ref-link-label">${escapeHtml(link.label)}</span>
+        <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ref-link-url">
+          ${escapeHtml(link.url.length > 55 ? link.url.substring(0, 52) + '...' : link.url)}
+        </a>
+      </div>
+      <button class="ref-link-remove" onclick="removeRefLink(${link.id})" title="Remove">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function showRefLinkError(msg) {
+  const el = document.getElementById('refLinkError');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+
+function clearRefLinkError() {
+  const el = document.getElementById('refLinkError');
+  if (el) el.style.display = 'none';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+}
+
+// Call this after project is created and you have the projectId
+async function saveProjectReferenceLinks(projectId) {
+  if (!window._refLinks || window._refLinks.length === 0) return;
+
+  const linksToInsert = window._refLinks.map(link => ({
+    project_id: projectId,   // the data->>'id' string value
+    label: link.label,
+    url: link.url,
+    added_by_role: 'admin'
+  }));
+
+  const { error } = await supabase
+    .from('project_reference_links')
+    .insert(linksToInsert);
+
+  if (error) console.error('[saveProjectReferenceLinks] Error:', error);
+  window._refLinks = [];
+}
+
+
+// ============================================================
+// HTML TEMPLATE — paste into your project creation wizard
+// as the last optional step before "Create Project"
+// ============================================================
+/*
+<div class="wizard-step" id="step-reference-links">
+  <div class="wizard-step-header">
+    <h3 class="wizard-step-title">Raw Assets & Reference Links</h3>
+    <p class="wizard-step-subtitle">
+      Share Drive folders, Dropbox links, Notion docs, or reference videos.
+      Your AI PM will reference these in every conversation.
+    </p>
+    <span class="wizard-step-optional">Optional</span>
+  </div>
+  <div class="ref-link-inputs">
+    <div class="ref-link-input-row">
+      <input type="text" id="refLinkLabel" placeholder='Label — e.g. "Raw Footage", "Moodboard"' class="input-field" maxlength="80" />
+      <input type="url" id="refLinkUrl" placeholder="https://drive.google.com/..." class="input-field" />
+      <button class="btn-add-link" onclick="addRefLink()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        Add
+      </button>
+    </div>
+    <p class="ref-link-error" id="refLinkError" style="display:none;"></p>
+  </div>
+  <div id="refLinksList" class="ref-links-list"></div>
+</div>
+*/
+
+
+// ============================================================
+// CSS — add to your main stylesheet
+// ============================================================
+/*
+.wizard-step-header { margin-bottom: 24px; position: relative; }
+.wizard-step-title { font-size: 18px; font-weight: 600; color: #F0F0FF; margin: 0 0 8px; }
+.wizard-step-subtitle { font-size: 13px; color: #6B6B8A; margin: 0; line-height: 1.5; max-width: 480px; }
+.wizard-step-optional { position: absolute; top: 0; right: 0; font-size: 11px; font-weight: 500; color: #6B6B8A; background: rgba(107,107,138,0.1); border: 1px solid rgba(107,107,138,0.2); border-radius: 4px; padding: 2px 8px; letter-spacing: 0.06em; text-transform: uppercase; }
+.ref-link-input-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.ref-link-input-row .input-field:first-child { flex: 1.2; }
+.ref-link-input-row .input-field:nth-child(2) { flex: 2; }
+.btn-add-link { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid #FF6B35; color: #FF6B35; padding: 9px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
+.btn-add-link:hover { background: rgba(255,107,53,0.1); }
+.ref-link-error { font-size: 12px; color: #EF4444; margin: 4px 0 0; }
+.ref-links-list { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.ref-links-empty { display: flex; flex-direction: column; align-items: center; padding: 24px; border: 1px dashed #2A2A40; border-radius: 8px; text-align: center; }
+.ref-links-empty-icon { font-size: 24px; margin-bottom: 8px; opacity: 0.5; }
+.ref-links-empty p { font-size: 13px; color: #6B6B8A; margin: 0; }
+.ref-link-item { display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid #2A2A40; border-radius: 8px; padding: 10px 14px; transition: border-color 0.15s ease; }
+.ref-link-item:hover { border-color: rgba(255,107,53,0.3); }
+.ref-link-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.ref-link-label { font-size: 13px; font-weight: 600; color: #F0F0FF; }
+.ref-link-url { font-size: 11px; color: #06B6D4; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
+.ref-link-url:hover { text-decoration: underline; }
+.ref-link-remove { background: none; border: none; color: #6B6B8A; cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: color 0.15s ease; flex-shrink: 0; }
+.ref-link-remove:hover { color: #EF4444; }
+*/
