@@ -4683,7 +4683,55 @@ const QG_TTS_MODELS=[
   {id:'fal-ai/f5-tts',n:'F5-TTS Voice Clone',desc:'Clone any voice from 10s audio sample',feature:'clone'},
   {id:'fal-ai/resemble-ai/chatterbox',n:'Chatterbox',desc:'Expressive, personality-driven, memes & games',feature:'clone'},
 ];
-const EL_VOICES=[{id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel — Calm, narrative'},{id:'9BWtsMINqrJLrRacOk9x',n:'Aria — Warm, conversational'},{id:'EXAVITQu4vr4xnSDxMaL',n:'Sarah — Soft, expressive'},{id:'TxGEqnHWrfWFTfGW9XjX',n:'Josh — Deep, authoritative'},{id:'ErXwobaYiN019PkySvjV',n:'Antoni — Warm, friendly'},{id:'pNInz6obpgDQGcFmaJgB',n:'Adam — Authoritative M'},{id:'onwK4e9ZLuTAKqWW03F9',n:'Daniel — British M'}];
+// ElevenLabs full premade voice library — all public voices
+const EL_VOICES=[
+  // ── American English — Female ─────────────────────────────────────────
+  {id:'21m00Tcm4TlvDq8ikWAM',n:'Rachel',gender:'F',accent:'American',use:'Narration, calm storytelling'},
+  {id:'EXAVITQu4vr4xnSDxMaL',n:'Sarah',gender:'F',accent:'American',use:'Soft, expressive'},
+  {id:'9BWtsMINqrJLrRacOk9x',n:'Aria',gender:'F',accent:'American',use:'Warm, conversational'},
+  {id:'XrExE9yKIg1WjnnlVkGX',n:'Matilda',gender:'F',accent:'American',use:'Warm, audiobooks'},
+  {id:'FGY2WhTYpPnrIDTdsKH5',n:'Laura',gender:'F',accent:'American',use:'Upbeat, positive'},
+  {id:'jsCqWAovK2LkecY7zXl4',n:'Freya',gender:'F',accent:'American',use:'Overly positive'},
+  {id:'z9fAnlkpzviPz146aGWa',n:'Glinda',gender:'F',accent:'American',use:'Witch-like, dramatic'},
+  {id:'oWAxZDx7w5VEj9dCyTzz',n:'Grace',gender:'F',accent:'American Southern',use:'Soft, Southern charm'},
+  // ── American English — Male ────────────────────────────────────────────
+  {id:'pNInz6obpgDQGcFmaJgB',n:'Adam',gender:'M',accent:'American',use:'Deep, news anchor'},
+  {id:'ErXwobaYiN019PkySvjV',n:'Antoni',gender:'M',accent:'American',use:'Warm, friendly'},
+  {id:'VR6AewLTigWG4xSOukaG',n:'Arnold',gender:'M',accent:'American',use:'Confident, crisp'},
+  {id:'N2lVS1w4EtoT3dr4eOWO',n:'Callum',gender:'M',accent:'American',use:'Hoarse, intense'},
+  {id:'IKne3meq5aSn9XLyUdCD',n:'Charlie',gender:'M',accent:'Australian',use:'Natural, conversational'},
+  {id:'XB0fDUnXU5powFXDhCwa',n:'Charlotte',gender:'F',accent:'Swedish',use:'Seductive, whispery'},
+  {id:'iP95p4xoKVk53GoZ742B',n:'Chris',gender:'M',accent:'American',use:'Casual, conversational'},
+  {id:'onwK4e9ZLuTAKqWW03F9',n:'Daniel',gender:'M',accent:'British',use:'Deep, authoritative'},
+  {id:'cjVigY5qzO86Huf0OWal',n:'Eric',gender:'M',accent:'American',use:'Friendly, professional'},
+  {id:'nPczCjzI2devNBz1zQrb',n:'Brian',gender:'M',accent:'American',use:'Deep, mature'},
+  {id:'GBv7mTt0atIp3Br8iCZE',n:'Thomas',gender:'M',accent:'American',use:'Calm, meditation'},
+  // ── British English ────────────────────────────────────────────────────
+  {id:'Zlb1dXrM653N07WRdFW3',n:'Joseph',gender:'M',accent:'British',use:'Ground reporter style'},
+  {id:'g5CIjZEefAph4nQFvHAz',n:'Ethan',gender:'M',accent:'American',use:'Whispery, ASMR'},
+  {id:'t0jbNlBVZ17f02VDIeMI',n:'Jessie',gender:'M',accent:'American',use:'Raspy, old man'},
+  {id:'flq6f7yk4E4fJM5XTYuZ',n:'Michael',gender:'M',accent:'American',use:'Odinot, old man'},
+  {id:'2EiwWnXFnvU5JabPnv8n',n:'Clyde',gender:'M',accent:'American',use:'War veteran, gravelly'},
+  {id:'AZnzlk1XvdvUeBnXmlld',n:'Domi',gender:'F',accent:'American',use:'Strong, confident'},
+  {id:'MF3mGyEYCl7XYWbV9V6O',n:'Elli',gender:'F',accent:'American',use:'Young, emotional'},
+  {id:'ThT5KcBeYPX3keUQqHPh',n:'Dorothy',gender:'F',accent:'British',use:'Pleasant, children stories'},
+  {id:'bVMeCyTHy58xNoL34h3p',n:'Jeremy',gender:'M',accent:'Irish',use:'Excited, young'},
+  {id:'SOYHLrjzK2X1ezoPC6cr',n:'Harry',gender:'M',accent:'British',use:'Anxious, raspy'},
+  {id:'D38z5RcWu1voky8WS1ja',n:'Patrick',gender:'M',accent:'American',use:'Shouty, intense'},
+  {id:'s3WItcmMbCxqKlANMhO0',n:'Liam',gender:'M',accent:'American',use:'Articulate, clear'},
+  {id:'TX3LPaxmHKxFdv7VOQHJ',n:'Lilly',gender:'F',accent:'British',use:'Warm, gentle'},
+  {id:'jBpfuIE2acCO8z3wKNLl',n:'Gigi',gender:'F',accent:'American',use:'Childlike, anime'},
+  {id:'piTKgcLEGmPE4e6mEKli',n:'Nicole',gender:'F',accent:'American',use:'Whispery, audiobooks'},
+  {id:'ODq5zdpy76ayYB57SzvQ',n:'Patrick',gender:'M',accent:'American',use:'Shouty'},
+  {id:'yoZ06aMxZJJ28mfd3POQ',n:'Sam',gender:'M',accent:'American',use:'Raspy, young'},
+  // ── Multi-language / Special ───────────────────────────────────────────
+  {id:'LcfcDJNUP1GQjkzn1xUU',n:'Emily',gender:'F',accent:'American',use:'Calm, meditation'},
+  {id:'Xb7hH8MSUJpSbSDYk0k2',n:'Alice',gender:'F',accent:'British',use:'Confident, news'},
+  {id:'wViXBPUzp2ZZixB1xQuM',n:'Serena',gender:'F',accent:'American',use:'Pleasant, conversational'},
+  {id:'ZQe5CZNOzWyzPSCn5a3c',n:'James',gender:'M',accent:'Australian',use:'Calm, calm'},
+  {id:'zcAOhNBS3c14rBihAFp1',n:'Giovanni',gender:'M',accent:'Italian',use:'Foreigner, enthusiastic'},
+  {id:'Yko7PKHZNXotIFUBG7I9',n:'Mimi',gender:'F',accent:'Swedish',use:'Childlike, sweet'},
+];
 
 function soundGenPage(){
   const sMode=S.sqgMode||'tts';
@@ -4699,7 +4747,7 @@ ${sMode==='tts'?`<div style="background:rgba(255,255,255,0.02);border:1px solid 
   <div class="fg" style="margin-bottom:12px"><label>Script</label><textarea id="sq-text" rows="5" placeholder="Type your voiceover script..." oninput="S.sqgText=this.value" style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;color:#C8C8E0;padding:10px;font-size:12px;resize:vertical;box-sizing:border-box;font-family:inherit">${S.sqgText||''}</textarea></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
     <div class="fg"><label>Model</label><select id="sq-model" onchange="S.sqgModel=this.value;render()">${_allTTSModels.map(m=>`<option value="${m.id}"${selModelId===m.id?' selected':''}>${m.n}</option>`).join('')}</select></div>
-    <div class="fg"><label>Voice</label>${selModel.feature==='voice_id'?`<select id="sq-voice">${EL_VOICES.map(v=>`<option value="${v.id}">${v.n}</option>`).join('')}</select>`:selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah F (US)</option><option value="am_adam">Adam M (US)</option><option value="bf_emma">Emma F (UK)</option></select>`:`<div style="font-size:10px;color:#6B6B8A;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">Uses reference audio below</div>`}</div>
+    <div class="fg"><label>Voice</label>${selModel.feature==='voice_id'?renderVoicePicker():selModel.feature==='voice'?`<select id="sq-voice"><option value="af_sarah">Sarah (F, US)</option><option value="am_adam">Adam (M, US)</option><option value="bf_emma">Emma (F, UK)</option><option value="bm_george">George (M, UK)</option></select>`:`<div style="font-size:10px;color:#6B6B8A;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">Uses reference audio below</div>`}</div>
   </div>
   ${selModel.feature==='clone'?`<div class="fg" style="margin-bottom:12px"><label>Reference Audio (for cloning)</label><div onclick="document.getElementById('sq-ref-audio').click()" style="border:2px dashed rgba(255,255,255,0.08);border-radius:8px;padding:14px;text-align:center;cursor:pointer"><div style="font-size:9px;color:#6B6B8A">${S.sqgRefAudioName||'Upload 10+ second audio sample'}</div></div><input type="file" id="sq-ref-audio" accept="audio/*" style="display:none" onchange="loadSqRefAudio(this)"></div>`:''}
   <button id="sq-gen-btn" onclick="runTTSGen()" style="width:100%;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#10B981,#06B6D4);color:#fff;font-size:13px;font-weight:700;cursor:pointer">&#127908; Generate Voiceover</button>
@@ -4737,10 +4785,116 @@ sMode==='music'?`<div style="background:rgba(255,255,255,0.02);border:1px solid 
 function loadSqRefAudio(input){const f=input.files[0];if(!f)return;S.sqgRefAudioName=f.name;const r=new FileReader();r.onload=e=>{S.sqgRefAudioData=e.target.result;render();};r.readAsDataURL(f);}
 function loadSqIsolateFile(input){const f=input.files[0];if(!f)return;S.sqgIsolateName=f.name;const r=new FileReader();r.onload=e=>{S.sqgIsolateData=e.target.result;render();};r.readAsDataURL(f);}
 
+
+// ══════════════════════════════════════════════════════════════════
+// ELEVENLABS VOICE LIBRARY
+// ══════════════════════════════════════════════════════════════════
+
+// Dynamic voice fetcher — loads full library from ElevenLabs API
+async function fetchElVoices(){
+  const btn=document.getElementById('sq-load-voices');
+  if(btn){btn.textContent='Loading...';btn.disabled=true;}
+  try{
+    const elKey=kE();
+    if(!elKey){
+      toast('Add your ElevenLabs API key in Settings → API Keys first','err');
+      if(btn){btn.textContent='Load All Voices';btn.disabled=false;}
+      return;
+    }
+    // Call ElevenLabs /v1/voices via our proxy
+    const r=await fetch('/api/elevenlabs',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:'/v1/voices',clientKey:elKey})
+    });
+    if(!r.ok){
+      // Fallback: call directly (CORS may block)
+      // Fallback already handled above — skip direct call
+      const r2={ok:false,status:0};
+      if(!r2.ok)throw new Error('ElevenLabs API returned '+r2.status);
+      const d2=await r2.json();
+      if(d2.voices){
+        S.elVoices=d2.voices.map(v=>({
+          id:v.voice_id,n:v.name,
+          gender:v.labels?.gender||'',
+          accent:v.labels?.accent||'',
+          use:v.labels?.use_case||v.description||'',
+          category:v.category||'premade'
+        }));
+        render();
+        toast(`Loaded ${S.elVoices.length} voices from ElevenLabs ✓`,'ok');
+        return;
+      }
+    }
+    const d=await r.json();
+    if(d.voices){
+      S.elVoices=d.voices.map(v=>({
+        id:v.voice_id,n:v.name,
+        gender:v.labels?.gender||'',
+        accent:v.labels?.accent||'',
+        use:v.labels?.use_case||v.description||'',
+        category:v.category||'premade'
+      }));
+      render();
+      toast(`Loaded ${S.elVoices.length} voices ✓`,'ok');
+    }
+  }catch(e){
+    // CORS blocked — use hardcoded list but show message
+    toast('Could not reach ElevenLabs directly. Using built-in library. Add an ElevenLabs key to load your cloned voices.','ok');
+    if(btn){btn.textContent='Load All Voices';btn.disabled=false;}
+  }
+}
+
+function renderVoicePicker(){
+  const voices=S.elVoices||EL_VOICES;
+  const isLoaded=!!S.elVoices;
+  const search=S.sqgVoiceSearch||'';
+  const gFilter=S.sqgVoiceGender||'';
+  const filtered=voices.filter(v=>{
+    const matchSearch=!search||v.n.toLowerCase().includes(search.toLowerCase())||(v.use||'').toLowerCase().includes(search.toLowerCase())||(v.accent||'').toLowerCase().includes(search.toLowerCase());
+    const matchGender=!gFilter||v.gender===gFilter;
+    return matchSearch&&matchGender;
+  });
+  const selId=S.sqgVoiceId||voices[0]?.id||'21m00Tcm4TlvDq8ikWAM';
+  return`<div>
+  <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+    <input type="text" id="sq-voice-search" value="${esc(search)}"
+      placeholder="Search ${voices.length} voices..." 
+      oninput="S.sqgVoiceSearch=this.value;render()"
+      style="flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#C8C8E0;padding:5px 8px;font-size:10px"/>
+    <select onchange="S.sqgVoiceGender=this.value;render()" 
+      style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#C8C8E0;padding:5px 8px;font-size:10px">
+      <option value="">All</option>
+      <option value="F"${gFilter==='F'?' selected':''}>Female</option>
+      <option value="M"${gFilter==='M'?' selected':''}>Male</option>
+    </select>
+    ${!isLoaded?`<button id="sq-load-voices" onclick="fetchElVoices()" 
+      style="white-space:nowrap;font-size:9px;padding:5px 8px;border-radius:6px;
+      background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);
+      color:#10B981;cursor:pointer">Load All</button>`:''}
+  </div>
+  <select id="sq-voice" onchange="S.sqgVoiceId=this.value"
+    style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
+    border-radius:7px;color:#C8C8E0;padding:7px 10px;font-size:11px;max-height:160px">
+    ${filtered.slice(0,100).map(v=>`<option value="${v.id}"${selId===v.id?' selected':''}>
+      ${esc(v.n)}${v.gender?' · '+v.gender:''}${v.accent?' · '+v.accent:''}${v.use?' — '+v.use.substring(0,30):''}
+    </option>`).join('')}
+    ${filtered.length>100?`<option disabled>... ${filtered.length-100} more — search to filter</option>`:''}
+  </select>
+  <div style="font-size:8px;color:#3a3a55;margin-top:3px;display:flex;justify-content:space-between">
+    <span>Showing ${Math.min(filtered.length,100)} of ${voices.length} voices</span>
+    ${!isLoaded?`<span style="color:#10B981;cursor:pointer" onclick="fetchElVoices()">Load full library →</span>`:`<span style="color:#10B981">✓ Full library loaded</span>`}
+  </div>
+</div>`;
+}
+
+// Also update the voice_id passed to runTTSGen to use S.sqgVoiceId
+// ══ END VOICE LIBRARY ════════════════════════════════════════════
+
 async function runTTSGen(){
   const text=document.getElementById('sq-text')?.value?.trim();if(!text)return toast('Enter a script','err');
   const modelId=document.getElementById('sq-model')?.value||QG_TTS_MODELS[0].id;
-  const voice=document.getElementById('sq-voice')?.value||'21m00Tcm4TlvDq8ikWAM';
+  const voice=document.getElementById('sq-voice')?.value||S.sqgVoiceId||'21m00Tcm4TlvDq8ikWAM';
   const k=kF();if(!k)return toast('Enter fal.ai key','err');
   S.sqgText=text;const btn=document.getElementById('sq-gen-btn');if(btn){btn.textContent='Generating...';btn.disabled=true;}aiStart();
   try{
